@@ -8,14 +8,27 @@ Beads provides persistent, structured task memory for coding agents. Tasks persi
 
 **Storage:** Dolt (version-controlled SQL database) provides MVCC, ACID transactions, cell-level diffs, and JSONL export for git portability.
 
+## Dependencies
+
+- [plan9port](https://9fans.github.io/plan9port/) (provides `9pfuse`)
+
 ## Usage
 
 ```sh
 # Start the server (registers as "beads" in 9P namespace)
-9beads
+9beads start       # background
+9beads fgstart     # foreground
+9beads status
+9beads stop
+```
 
-# Interact via 9p client
+On startup, the server automatically mounts at `~/mnt/beads` via 9pfuse.
+
+```sh
+# Interact via 9p client or mounted filesystem
 9p read beads/list
+cat ~/mnt/beads/list
+
 echo 'new "My task" "Description"' | 9p write beads/ctl
 ```
 
