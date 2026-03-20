@@ -10,7 +10,7 @@ Beads provides persistent, structured task memory for coding agents. Tasks persi
 
 ## Dependencies
 
-- [plan9port](https://github.com/lneely/plan9port) (wayland branch required for `9pfuse` truncate fix)
+- [plan9port](https://github.com/lneely/plan9port) (wayland-9pfuse-truncate branch required for `9pfuse` truncate fix)
 
 ## Usage
 
