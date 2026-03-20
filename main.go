@@ -179,11 +179,30 @@ func runServer(sockPath, pidPath string) {
 
 	log.Printf("9beads listening on %s", sockPath)
 
+	// Setup FUSE mount
+	mnt := filepath.Join(os.Getenv("HOME"), "mnt", "beads")
+	var fuseCmd *exec.Cmd
+	if err := os.MkdirAll(mnt, 0755); err != nil {
+		log.Printf("warning: cannot create mount dir: %v", err)
+	} else {
+		fuseCmd = exec.Command("9pfuse", sockPath, mnt)
+		if err := fuseCmd.Start(); err != nil {
+			log.Printf("warning: 9pfuse failed: %v", err)
+			fuseCmd = nil
+		} else {
+			log.Printf("mounted at %s", mnt)
+		}
+	}
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
 	log.Println("shutting down")
+	if fuseCmd != nil {
+		exec.Command("fusermount", "-u", mnt).Run()
+		fuseCmd.Wait()
+	}
 	listener.Close()
 	os.Remove(sockPath)
 	os.Remove(pidPath)
