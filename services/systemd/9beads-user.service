@@ -7,7 +7,7 @@ After=default.target
 Type=simple
 WorkingDirectory=%h
 
-ExecStart=%h/bin/Beads
+ExecStart=%h/bin/Beads fgstart
 
 Restart=on-failure
 RestartSec=5s

@@ -12,7 +12,7 @@ WorkingDirectory=/home/%i
 Environment="PATH=/home/%i/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="HOME=/home/%i"
 
-ExecStart=/home/%i/bin/Beads
+ExecStart=/home/%i/bin/Beads fgstart
 
 Restart=on-failure
 RestartSec=5s

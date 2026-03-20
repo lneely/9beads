@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -72,22 +74,93 @@ type Server struct {
 func main() {
 	flag.Parse()
 
+	if flag.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "usage: Beads <start|stop|fgstart|status>")
+		os.Exit(1)
+	}
+
 	ns := client.Namespace()
 	if ns == "" {
 		log.Fatal("no namespace")
 	}
 
 	sockPath := filepath.Join(ns, serviceName)
+	pidPath := filepath.Join(ns, serviceName+".pid")
 
+	switch flag.Arg(0) {
+	case "start":
+		if isRunning(sockPath) {
+			fmt.Println("9beads already running")
+			os.Exit(0)
+		}
+		daemonize(pidPath)
+	case "fgstart":
+		if isRunning(sockPath) {
+			fmt.Println("9beads already running")
+			os.Exit(0)
+		}
+		runServer(sockPath, pidPath)
+	case "stop":
+		stopServer(sockPath, pidPath)
+	case "status":
+		if isRunning(sockPath) {
+			fmt.Println("9beads running")
+		} else {
+			fmt.Println("9beads not running")
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintln(os.Stderr, "usage: Beads <start|stop|fgstart|status>")
+		os.Exit(1)
+	}
+}
+
+func isRunning(sockPath string) bool {
+	conn, err := net.Dial("unix", sockPath)
+	if err == nil {
+		conn.Close()
+		return true
+	}
+	return false
+}
+
+func daemonize(pidPath string) {
+	exe, _ := os.Executable()
+	cmd := exec.Command(exe, "fgstart")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("9beads started (pid %d)\n", cmd.Process.Pid)
+}
+
+func stopServer(sockPath, pidPath string) {
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		fmt.Println("9beads not running")
+		return
+	}
+	var pid int
+	fmt.Sscanf(string(data), "%d", &pid)
+	if pid > 0 {
+		syscall.Kill(pid, syscall.SIGTERM)
+	}
+	os.Remove(pidPath)
+	os.Remove(sockPath)
+	fmt.Println("9beads stopped")
+}
+
+func runServer(sockPath, pidPath string) {
 	// Remove stale socket
 	if _, err := os.Stat(sockPath); err == nil {
-		conn, err := net.Dial("unix", sockPath)
-		if err == nil {
-			conn.Close()
-			log.Fatal("beads server already running")
-		}
 		os.Remove(sockPath)
 	}
+
+	// Write PID file
+	os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
 
 	listener, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -113,6 +186,7 @@ func main() {
 	log.Println("shutting down")
 	listener.Close()
 	os.Remove(sockPath)
+	os.Remove(pidPath)
 }
 
 func (s *Server) acceptLoop() {

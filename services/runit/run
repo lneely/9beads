@@ -4,4 +4,4 @@ exec 2>&1
 export HOME=${HOME:-/home/$(whoami)}
 export PATH="${HOME}/bin:/usr/local/bin:/usr/bin:/bin"
 
-exec chpst -u $(whoami) Beads
+exec chpst -u $(whoami) Beads fgstart
