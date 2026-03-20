@@ -4,6 +4,8 @@
 # Usage: claim_bead.sh --mount <mount> --id <bead-id>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 BEAD_ID=""
@@ -26,9 +28,9 @@ if [ -z "${AGENT_ID:-}" ]; then
     exit 1
 fi
 
-echo "claim $BEAD_ID $AGENT_ID" | 9p write beads/$MOUNT/ctl
+echo "claim $BEAD_ID $AGENT_ID" > "$BEADS"/$MOUNT/ctl
 
-assignee=$(9p read beads/$MOUNT/$BEAD_ID/json 2>/dev/null | jq -r '.assignee // empty')
+assignee=$(cat "$BEADS"/$MOUNT/$BEAD_ID/json 2>/dev/null | jq -r '.assignee // empty')
 if [ "$assignee" != "$AGENT_ID" ]; then
     echo "error: claim failed (bead is assigned to '$assignee')" >&2
     exit 1

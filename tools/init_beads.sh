@@ -4,6 +4,8 @@
 # Usage: init_beads.sh --mount <mount> [--prefix <prefix>]
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 PREFIX="bd"
@@ -21,5 +23,5 @@ if [ -z "$MOUNT" ]; then
     exit 1
 fi
 
-echo "init $PREFIX" | 9p write "beads/$MOUNT/ctl"
+echo "init $PREFIX" > "$BEADS/$MOUNT/ctl"
 echo "initialized $MOUNT (prefix: $PREFIX)"

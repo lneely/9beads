@@ -4,6 +4,8 @@
 # Usage: wait_for_bead.sh --mount <mount>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 MOUNT=""
 
 while [[ $# -gt 0 ]]; do
@@ -19,7 +21,7 @@ if [ -z "$MOUNT" ]; then
 fi
 
 # Derive scope from cwd relative to mount's cwd
-MOUNT_CWD=$(9p read "beads/$MOUNT/cwd" 2>/dev/null)
+MOUNT_CWD=$(cat "$BEADS/$MOUNT/cwd" 2>/dev/null)
 if [ -n "$MOUNT_CWD" ]; then
     REL_PATH="${PWD#"$MOUNT_CWD"}"
     REL_PATH="${REL_PATH#/}"
@@ -30,7 +32,7 @@ fi
 
 EXPECTED_SOURCE="beads/$MOUNT"
 
-exec 3< <(9p read anvillm/events 2>/dev/null)
+exec 3< <(cat "$BEADS/events" 2>/dev/null)
 EVENTS_PID=$!
 trap 'kill $EVENTS_PID 2>/dev/null; exec 3<&-' EXIT
 

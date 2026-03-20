@@ -4,6 +4,8 @@
 # Usage: read_bead_comments.sh --mount <mount> --id <bead-id>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 BEAD_ID=""
@@ -21,4 +23,4 @@ if [ -z "$MOUNT" ] || [ -z "$BEAD_ID" ]; then
     exit 1
 fi
 
-9p read "beads/$MOUNT/$BEAD_ID/comments" 2>/dev/null || echo "[]"
+cat "$BEADS/$MOUNT/$BEAD_ID/comments" 2>/dev/null || echo "[]"

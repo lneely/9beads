@@ -4,6 +4,8 @@
 # Usage: relate_beads.sh --mount <mount> --bead1 <id> --bead2 <id>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 BEAD1=""
@@ -23,5 +25,5 @@ if [ -z "$MOUNT" ] || [ -z "$BEAD1" ] || [ -z "$BEAD2" ]; then
     exit 1
 fi
 
-echo "relate $BEAD1 $BEAD2" | 9p write beads/$MOUNT/ctl
+echo "relate $BEAD1 $BEAD2" > "$BEADS"/$MOUNT/ctl
 echo "related $BEAD1 ↔ $BEAD2"

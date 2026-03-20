@@ -4,6 +4,8 @@
 # Usage: remove_dependency.sh --mount <mount> --child <child-id> --parent <parent-id>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 CHILD=""
@@ -23,5 +25,5 @@ if [ -z "$MOUNT" ] || [ -z "$CHILD" ] || [ -z "$PARENT" ]; then
     exit 1
 fi
 
-echo "undep $CHILD $PARENT" | 9p write beads/$MOUNT/ctl
+echo "undep $CHILD $PARENT" > "$BEADS"/$MOUNT/ctl
 echo "$CHILD no longer depends on $PARENT"

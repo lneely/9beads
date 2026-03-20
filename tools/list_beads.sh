@@ -4,6 +4,8 @@
 # Usage: list_beads.sh --mount <mount>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 
@@ -20,7 +22,7 @@ if [ -z "$MOUNT" ]; then
 fi
 
 # Derive scope from cwd relative to mount's cwd
-MOUNT_CWD=$(9p read "beads/$MOUNT/cwd" 2>/dev/null)
+MOUNT_CWD=$(cat "$BEADS/$MOUNT/cwd" 2>/dev/null)
 MY_SCOPE=""
 if [ -n "$MOUNT_CWD" ]; then
     REL_PATH="${PWD#"$MOUNT_CWD"}"
@@ -29,4 +31,4 @@ if [ -n "$MOUNT_CWD" ]; then
 fi
 
 # Strict match: scope must equal (both empty or both same value)
-9p read "beads/$MOUNT/list" 2>/dev/null | jq --arg scope "$MY_SCOPE" '[.[] | select((.scope // "") == $scope) | {id, priority, title, status, scope}]' || echo "[]"
+cat "$BEADS/$MOUNT/list" 2>/dev/null | jq --arg scope "$MY_SCOPE" '[.[] | select((.scope // "") == $scope) | {id, priority, title, status, scope}]' || echo "[]"

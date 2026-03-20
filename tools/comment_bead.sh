@@ -4,6 +4,8 @@
 # Usage: comment_bead.sh --mount <mount> --id <bead-id> --text <text>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 BEAD_ID=""
@@ -23,5 +25,5 @@ if [ -z "$MOUNT" ] || [ -z "$BEAD_ID" ] || [ -z "$TEXT" ]; then
     exit 1
 fi
 
-printf "comment %s '%s'\n" "$BEAD_ID" "$TEXT" | 9p write beads/$MOUNT/ctl
+printf "comment %s '%s'\n" "$BEAD_ID" "$TEXT" > "$BEADS"/$MOUNT/ctl
 echo "commented on $BEAD_ID"

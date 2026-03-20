@@ -4,6 +4,8 @@
 # Usage: config_beads.sh --mount <mount> --key <key> --value <value>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 KEY=""
@@ -23,5 +25,5 @@ if [ -z "$MOUNT" ] || [ -z "$KEY" ]; then
     exit 1
 fi
 
-echo "config $KEY $VALUE" | 9p write beads/$MOUNT/ctl
+echo "config $KEY $VALUE" > "$BEADS"/$MOUNT/ctl
 echo "config $KEY = $VALUE"

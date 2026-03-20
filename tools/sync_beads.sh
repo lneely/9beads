@@ -4,6 +4,8 @@
 # Usage: sync_beads.sh --mount <mount>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 
@@ -19,5 +21,5 @@ if [ -z "$MOUNT" ]; then
     exit 1
 fi
 
-echo "sync" | 9p write "beads/$MOUNT/ctl"
+echo "sync" > "$BEADS/$MOUNT/ctl"
 echo "synced $MOUNT"

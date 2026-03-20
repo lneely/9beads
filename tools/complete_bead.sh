@@ -4,6 +4,8 @@
 # Usage: complete_bead.sh --mount <mount> --id <bead-id>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 BEAD_ID=""
@@ -21,5 +23,5 @@ if [ -z "$MOUNT" ] || [ -z "$BEAD_ID" ]; then
     exit 1
 fi
 
-echo "complete $BEAD_ID" | 9p write beads/$MOUNT/ctl
+echo "complete $BEAD_ID" > "$BEADS"/$MOUNT/ctl
 echo "completed $BEAD_ID"

@@ -4,6 +4,8 @@
 # Usage: label_bead.sh --mount <mount> --id <bead-id> --label <label>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 BEAD_ID=""
@@ -23,5 +25,5 @@ if [ -z "$MOUNT" ] || [ -z "$BEAD_ID" ] || [ -z "$LABEL" ]; then
     exit 1
 fi
 
-echo "label $BEAD_ID $LABEL" | 9p write beads/$MOUNT/ctl
+echo "label $BEAD_ID $LABEL" > "$BEADS"/$MOUNT/ctl
 echo "labeled $BEAD_ID: $LABEL"

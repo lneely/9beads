@@ -4,6 +4,8 @@
 # Usage: batch_create_beads.sh --mount <mount> --json <json-array>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 JSON=""
@@ -22,7 +24,7 @@ if [ -z "$MOUNT" ] || [ -z "$JSON" ]; then
 fi
 
 # Derive scope from cwd relative to mount's cwd
-MOUNT_CWD=$(9p read "beads/$MOUNT/cwd" 2>/dev/null)
+MOUNT_CWD=$(cat "$BEADS/$MOUNT/cwd" 2>/dev/null)
 SCOPE=""
 if [ -n "$MOUNT_CWD" ]; then
     REL_PATH="${PWD#"$MOUNT_CWD"}"
@@ -35,5 +37,5 @@ if [ -n "$SCOPE" ]; then
     JSON=$(echo "$JSON" | jq --arg scope "$SCOPE" '[.[] | . + {scope: $scope}]')
 fi
 
-echo "batch-create $JSON" | 9p write "beads/$MOUNT/ctl"
+echo "batch-create $JSON" > "$BEADS/$MOUNT/ctl"
 echo "batch created beads"

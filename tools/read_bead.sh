@@ -5,6 +5,8 @@
 # Properties: json, status, title, description, assignee, comments, labels
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 BEAD_ID=""
@@ -24,4 +26,4 @@ if [ -z "$MOUNT" ] || [ -z "$BEAD_ID" ] || [ -z "$PROPERTY" ]; then
     exit 1
 fi
 
-9p read "beads/$MOUNT/$BEAD_ID/$PROPERTY" 2>/dev/null || echo "Property not found: $PROPERTY"
+cat "$BEADS/$MOUNT/$BEAD_ID/$PROPERTY" 2>/dev/null || echo "Property not found: $PROPERTY"

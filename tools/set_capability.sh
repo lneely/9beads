@@ -4,6 +4,8 @@
 # Usage: set_capability.sh --mount <mount> --id <bead-id> --level <low|standard|high>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 BEAD_ID=""
@@ -23,5 +25,5 @@ if [ -z "$MOUNT" ] || [ -z "$BEAD_ID" ] || [ -z "$LEVEL" ]; then
     exit 1
 fi
 
-echo "set-capability $BEAD_ID $LEVEL" | 9p write beads/$MOUNT/ctl
+echo "set-capability $BEAD_ID $LEVEL" > "$BEADS"/$MOUNT/ctl
 echo "capability set: $BEAD_ID → $LEVEL"

@@ -4,6 +4,8 @@
 # Usage: defer_bead.sh --mount <mount> --id <bead-id> [--until <RFC3339-time>]
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 BEAD_ID=""
@@ -24,9 +26,9 @@ if [ -z "$MOUNT" ] || [ -z "$BEAD_ID" ]; then
 fi
 
 if [ -n "$UNTIL" ]; then
-    echo "defer $BEAD_ID until $UNTIL" | 9p write beads/$MOUNT/ctl
+    echo "defer $BEAD_ID until $UNTIL" > "$BEADS"/$MOUNT/ctl
     echo "deferred $BEAD_ID until $UNTIL"
 else
-    echo "defer $BEAD_ID" | 9p write beads/$MOUNT/ctl
+    echo "defer $BEAD_ID" > "$BEADS"/$MOUNT/ctl
     echo "deferred $BEAD_ID"
 fi

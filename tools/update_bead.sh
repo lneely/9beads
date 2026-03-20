@@ -4,6 +4,8 @@
 # Usage: update_bead.sh --mount <mount> --id <bead-id> --field <field> --value <value>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 BEAD_ID=""
@@ -27,19 +29,19 @@ fi
 
 if [ "$FIELD" = "parent" ]; then
     # Reparent: create new bead under parent with same data, then delete original
-    JSON=$(9p read "beads/$MOUNT/$BEAD_ID/json")
+    JSON=$(cat "$BEADS/$MOUNT/$BEAD_ID/json")
     TITLE=$(echo "$JSON" | jq -r '.title')
     DESC=$(echo "$JSON" | jq -r '.description // ""')
     STATUS=$(echo "$JSON" | jq -r '.status')
     
     # Create under new parent
-    printf "new '%s' '%s' %s\n" "$TITLE" "$DESC" "$VALUE" | 9p write beads/$MOUNT/ctl
+    printf "new '%s' '%s' %s\n" "$TITLE" "$DESC" "$VALUE" > "$BEADS"/$MOUNT/ctl
     
     # Delete original
-    printf "delete %s\n" "$BEAD_ID" | 9p write beads/$MOUNT/ctl
+    printf "delete %s\n" "$BEAD_ID" > "$BEADS"/$MOUNT/ctl
     
     echo "reparented $BEAD_ID under $VALUE"
 else
-    printf "update %s %s '%s'\n" "$BEAD_ID" "$FIELD" "$VALUE" | 9p write beads/$MOUNT/ctl
+    printf "update %s %s '%s'\n" "$BEAD_ID" "$FIELD" "$VALUE" > "$BEADS"/$MOUNT/ctl
     echo "updated $BEAD_ID.$FIELD: $VALUE"
 fi

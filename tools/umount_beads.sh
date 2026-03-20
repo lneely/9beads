@@ -4,6 +4,8 @@
 # Usage: umount_beads.sh --mount <name>
 set -euo pipefail
 
+BEADS="${BEADS_9MOUNT:-$HOME/mnt/beads}"
+
 
 MOUNT=""
 
@@ -19,5 +21,5 @@ if [ -z "$MOUNT" ]; then
     exit 1
 fi
 
-echo "umount $MOUNT" | 9p write beads/ctl
+echo "umount $MOUNT" > "$BEADS"/ctl
 echo "unmounted $MOUNT"
