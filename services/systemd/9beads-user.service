@@ -1,0 +1,16 @@
+[Unit]
+Description=9beads Task Server (User Service)
+Documentation=https://github.com/lneely/9beads
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+
+ExecStart=%h/bin/Beads
+
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
