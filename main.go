@@ -180,7 +180,10 @@ func runServer(sockPath, pidPath string) {
 	log.Printf("9beads listening on %s", sockPath)
 
 	// Setup FUSE mount
-	mnt := filepath.Join(os.Getenv("HOME"), "mnt", "beads")
+	mnt := os.Getenv("BEADS_9MOUNT")
+	if mnt == "" {
+		mnt = filepath.Join(os.Getenv("HOME"), "mnt", "beads")
+	}
 	var fuseCmd *exec.Cmd
 	if err := os.MkdirAll(mnt, 0755); err != nil {
 		log.Printf("warning: cannot create mount dir: %v", err)
