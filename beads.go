@@ -462,6 +462,8 @@ func (b *BeadsFS) Read(path string) ([]byte, error) {
 func (b *BeadsFS) readFromMount(m *MountedProject, endpoint string) ([]byte, error) {
 	parts := strings.Split(endpoint, "/")
 	switch {
+	case len(parts) == 1 && parts[0] == "cwd":
+		return []byte(m.cwd), nil
 	case len(parts) == 1 && parts[0] == "list":
 		return b.readListFromStore(m.store, 100)
 	case len(parts) == 2 && parts[0] == "list":
