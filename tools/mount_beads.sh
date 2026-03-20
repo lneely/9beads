@@ -24,7 +24,7 @@ fi
 
 MOUNT=$(uuidgen | cut -d- -f1)
 
-echo "mount $CWD $MOUNT" > "$BEADS"/ctl
+echo "mount $CWD $MOUNT" | 9p write beads/ctl
 
 # Verify mount succeeded
 if ! cat "$BEADS"/mtab 2>/dev/null | grep -q "^$MOUNT	"; then

@@ -37,5 +37,5 @@ if [ -n "$SCOPE" ]; then
     JSON=$(echo "$JSON" | jq --arg scope "$SCOPE" '[.[] | . + {scope: $scope}]')
 fi
 
-echo "batch-create $JSON" > "$BEADS/$MOUNT/ctl"
+echo "batch-create $JSON" | 9p write "beads/$MOUNT/ctl"
 echo "batch created beads"

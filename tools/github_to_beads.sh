@@ -66,19 +66,19 @@ fi
 bead_title="#$number: $title"
 
 # Create parent bead
-echo "new \"$bead_title\" \"$body\" '' $SCOPE_ARG" > "$BEADS/$MOUNT/ctl"
+echo "new \"$bead_title\" \"$body\" '' $SCOPE_ARG" | 9p write "beads/$MOUNT/ctl"
 
 # Get created bead ID
 bead_id=$(cat "$BEADS/$MOUNT/list" | jq -r ".[] | select(.title | contains(\"#$number\")) | .id" | head -1)
 
 # Update issue type if not task
 if [[ "$issue_type" != "task" ]]; then
-    echo "update $bead_id issue_type $issue_type" > "$BEADS/$MOUNT/ctl"
+    echo "update $bead_id issue_type $issue_type" | 9p write "beads/$MOUNT/ctl"
 fi
 
 # Update status if closed
 if [[ "$status" == "closed" ]]; then
-    echo "update $bead_id status closed" > "$BEADS/$MOUNT/ctl"
+    echo "update $bead_id status closed" | 9p write "beads/$MOUNT/ctl"
 fi
 
 # Parse task list from body
@@ -86,7 +86,7 @@ if [[ -n "$body" ]]; then
     # Extract unchecked tasks: - [ ] Task name
     echo "$body" | grep -E '^\s*-\s+\[\s+\]' | sed -E 's/^\s*-\s+\[\s+\]\s*//' | while IFS= read -r task; do
         if [[ -n "$task" ]]; then
-            echo "new \"$task\" \"\" $bead_id $SCOPE_ARG" > "$BEADS/$MOUNT/ctl"
+            echo "new \"$task\" \"\" $bead_id $SCOPE_ARG" | 9p write "beads/$MOUNT/ctl"
         fi
     done
 fi

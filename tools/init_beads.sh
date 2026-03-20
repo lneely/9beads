@@ -23,5 +23,5 @@ if [ -z "$MOUNT" ]; then
     exit 1
 fi
 
-echo "init $PREFIX" > "$BEADS/$MOUNT/ctl"
+echo "init $PREFIX" | 9p write "beads/$MOUNT/ctl"
 echo "initialized $MOUNT (prefix: $PREFIX)"

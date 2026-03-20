@@ -71,9 +71,9 @@ create_bead() {
 
     # Create bead
     if [[ -n "$parent_bead" ]]; then
-        echo "new \"$title\" \"$description\" $parent_bead $SCOPE_ARG" > "$BEADS/$MOUNT/ctl"
+        echo "new \"$title\" \"$description\" $parent_bead $SCOPE_ARG" | 9p write "beads/$MOUNT/ctl"
     else
-        echo "new \"$title\" \"$description\" '' $SCOPE_ARG" > "$BEADS/$MOUNT/ctl"
+        echo "new \"$title\" \"$description\" '' $SCOPE_ARG" | 9p write "beads/$MOUNT/ctl"
     fi
 
     # Get created bead ID

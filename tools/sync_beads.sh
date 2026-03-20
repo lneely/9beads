@@ -21,5 +21,5 @@ if [ -z "$MOUNT" ]; then
     exit 1
 fi
 
-echo "sync" > "$BEADS/$MOUNT/ctl"
+echo "sync" | 9p write "beads/$MOUNT/ctl"
 echo "synced $MOUNT"
