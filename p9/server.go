@@ -150,7 +150,7 @@ func (s *Server) pathType(path string) string {
 		return "dir"
 	}
 	trimmed := strings.TrimPrefix(path, "/")
-	parts := strings.SplitN(trimmed, "/", 3)
+	parts := strings.Split(trimmed, "/")
 	switch {
 	case len(parts) == 1:
 		switch parts[0] {
@@ -174,11 +174,40 @@ func (s *Server) pathType(path string) string {
 		switch parts[1] {
 		case "ctl", "cwd", "list", "ready", "deferred", "closed":
 			return "file"
+		case "comments":
+			return "dir"
 		default:
 			ctx := context.Background()
 			issue, err := m.store.GetIssue(ctx, parts[1])
 			if err == nil && issue != nil {
 				return "file"
+			}
+		}
+	case len(parts) == 3 && parts[1] == "comments":
+		// /mount/comments/<bead-id> — dir of comments
+		s.mu.RLock()
+		m, ok := s.mounts[parts[0]]
+		s.mu.RUnlock()
+		if ok {
+			issue, err := m.store.GetIssue(context.Background(), parts[2])
+			if err == nil && issue != nil {
+				return "dir"
+			}
+		}
+	case len(parts) == 4 && parts[1] == "comments":
+		// /mount/comments/<bead-id>/list or /mount/comments/<bead-id>/<comment-id>
+		s.mu.RLock()
+		m, ok := s.mounts[parts[0]]
+		s.mu.RUnlock()
+		if ok {
+			if parts[3] == "list" {
+				return "file"
+			}
+			comments, _ := m.store.GetIssueComments(context.Background(), parts[2])
+			for _, c := range comments {
+				if c.ID == parts[3] {
+					return "file"
+				}
 			}
 		}
 	}
@@ -368,7 +397,7 @@ func (s *Server) Close() {
 
 func (s *Server) readFile(path string) []byte {
 	trimmed := strings.TrimPrefix(path, "/")
-	parts := strings.SplitN(trimmed, "/", 3)
+	parts := strings.Split(trimmed, "/")
 	ctx := context.Background()
 	if len(parts) == 1 {
 		switch parts[0] {
@@ -417,6 +446,13 @@ func (s *Server) readFile(path string) []byte {
 		default:
 			return s.readBead(ctx, m, parts[1])
 		}
+	}
+	// /mount/comments/<bead-id>/list or /mount/comments/<bead-id>/<comment-id>
+	if len(parts) == 4 && parts[1] == "comments" {
+		if parts[3] == "list" {
+			return s.readCommentList(ctx, m, parts[2])
+		}
+		return s.readComment(ctx, m, parts[2], parts[3])
 	}
 	return nil
 }
@@ -526,6 +562,34 @@ func (s *Server) readBead(ctx context.Context, m *mount, id string) []byte {
 	return []byte(b.String())
 }
 
+func (s *Server) readComment(ctx context.Context, m *mount, beadID, commentID string) []byte {
+	comments, err := m.store.GetIssueComments(ctx, beadID)
+	if err != nil {
+		return nil
+	}
+	for _, c := range comments {
+		if c.ID == commentID {
+			return []byte(fmt.Sprintf("%s\t%s\n%s\n", c.Author, c.CreatedAt.Format("2006-01-02 15:04"), c.Text))
+		}
+	}
+	return nil
+}
+
+func (s *Server) readCommentList(ctx context.Context, m *mount, beadID string) []byte {
+	comments, err := m.store.GetIssueComments(ctx, beadID)
+	if err != nil || len(comments) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	for i, c := range comments {
+		if i > 0 {
+			b.WriteString("\n---\n")
+		}
+		fmt.Fprintf(&b, "%s\t%s\n%s\n", c.Author, c.CreatedAt.Format("2006-01-02 15:04"), c.Text)
+	}
+	return []byte(b.String())
+}
+
 type beadFrontmatter struct {
 	ID       string   `yaml:"id"`
 	Title    string   `yaml:"title"`
@@ -559,22 +623,44 @@ func (s *Server) readDir(path string, offset uint64, count uint32) []byte {
 		s.mu.RUnlock()
 	} else {
 		trimmed := strings.TrimPrefix(path, "/")
+		parts := strings.Split(trimmed, "/")
 		s.mu.RLock()
-		m, ok := s.mounts[trimmed]
+		m, ok := s.mounts[parts[0]]
 		s.mu.RUnlock()
-		if ok {
+		if ok && len(parts) == 1 {
+			// Mount root directory
 			dirs = append(dirs, mk("ctl", path+"/ctl", false, 0222))
 			dirs = append(dirs, mk("cwd", path+"/cwd", false, 0444))
 			dirs = append(dirs, mk("list", path+"/list", false, 0444))
 			dirs = append(dirs, mk("ready", path+"/ready", false, 0444))
 			dirs = append(dirs, mk("deferred", path+"/deferred", false, 0444))
 			dirs = append(dirs, mk("closed", path+"/closed", false, 0444))
+			dirs = append(dirs, mk("comments", path+"/comments", true, plan9.DMDIR|0555))
 			ctx := context.Background()
 			issues, _ := m.store.SearchIssues(ctx, "", beads.IssueFilter{
 				ExcludeStatus: []beads.Status{beads.StatusClosed},
 			})
 			for _, iss := range issues {
 				dirs = append(dirs, mk(iss.ID, path+"/"+iss.ID, false, 0666))
+			}
+		} else if ok && len(parts) == 2 && parts[1] == "comments" {
+			// /mount/comments — list bead IDs that have comments
+			ctx := context.Background()
+			issues, _ := m.store.SearchIssues(ctx, "", beads.IssueFilter{})
+			for _, iss := range issues {
+				comments, _ := m.store.GetIssueComments(ctx, iss.ID)
+				if len(comments) > 0 {
+					dirs = append(dirs, mk(iss.ID, path+"/"+iss.ID, true, plan9.DMDIR|0555))
+				}
+			}
+		} else if ok && len(parts) == 3 && parts[1] == "comments" {
+			// /mount/comments/<bead-id> — list file + comment IDs
+			ctx := context.Background()
+			dirs = append(dirs, mk("list", path+"/list", false, 0444))
+			comments, _ := m.store.GetIssueComments(ctx, parts[2])
+			for _, c := range comments {
+				cid := c.ID
+				dirs = append(dirs, mk(cid, path+"/"+cid, false, 0444))
 			}
 		}
 	}
