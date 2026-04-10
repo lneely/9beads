@@ -47,7 +47,14 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
 
 ### Bead files
 
-Each bead is a plain text file with YAML frontmatter:
+Each bead is a plain text file with YAML frontmatter. Only open beads appear in directory listings, but closed beads are still accessible by ID — like hidden files:
+
+```sh
+cat $bdir/bd-a1b2          # works even if bd-a1b2 is closed
+grep "bd-a1b2" $bdir/closed # find it in the closed list first
+```
+
+Format:
 
 ```
 ---
