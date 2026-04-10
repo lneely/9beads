@@ -27,29 +27,22 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
 
 ```
 ~/mnt/beads/
-├── ctl                    # global control (mount, umount)
-├── mtab                   # mount table: <name>\t<cwd>
-├── ready                  # ready beads across all mounts
-├── deferred               # deferred beads across all mounts
-├── closed                 # last 100 closed beads across all mounts
-├── events                 # event stream (JSON, blocking read)
+├── ctl              # global control (mount, umount)
+├── mtab             # mount table: <name>\t<cwd>
+├── ready            # ready beads across all mounts
+├── deferred         # deferred beads across all mounts
+├── closed           # last 100 closed beads across all mounts
+├── events           # event stream (JSON, blocking read)
 └── <mount>/
-    ├── ctl                # mount control (create, claim, complete, etc.)
-    ├── cwd                # working directory for this mount
-    ├── list               # all open beads
-    ├── list/<n>           # all open beads, limit n
-    ├── ready              # ready beads (unblocked, open)
-    ├── ready/<n>          # ready beads, limit n
-    ├── deferred           # deferred beads
-    ├── closed             # last 100 closed beads
-    ├── blocked            # blocked beads
-    ├── stale              # beads not updated in 30+ days
-    ├── search/<query>     # text search results
-    ├── by-ref/<ref>       # bead by external reference
-    ├── batch/<id,...>     # batch lookup by IDs
-    ├── label/<label>      # beads with label
-    ├── children/<id>      # direct children of parent
-    └── <bead-id>          # bead file (markdown + YAML frontmatter)
+    ├── ctl          # mount control (new, claim, complete, etc.)
+    ├── cwd          # working directory for this mount
+    ├── list         # all open beads
+    ├── list/<n>     # all open beads, limit n
+    ├── ready        # ready beads (open, unblocked)
+    ├── ready/<n>    # ready beads, limit n
+    ├── deferred     # deferred beads
+    ├── closed       # last 100 closed beads
+    └── <bead-id>    # bead file (markdown + YAML frontmatter)
 ```
 
 ### Bead files
@@ -61,7 +54,9 @@ Each bead is a plain text file with YAML frontmatter:
 id: bd-a1b2
 title: Fix login bug
 status: deferred
+updated: 2026-04-01
 parent:
+labels: []
 blockers: []
 ---
 Add OAuth token refresh logic in auth/token.go.
@@ -69,9 +64,12 @@ Add OAuth token refresh logic in auth/token.go.
 
 Read and write it like any file. On write, the frontmatter is parsed and the store is updated.
 
+> Note: `sed -i` is not supported on 9P filesystems. Pipe through sed instead:
+> `sed "s/^title: .*/title: New title/" $bdir/bd-a1b2 > $bdir/bd-a1b2`
+
 ### List format
 
-`list`, `ready`, `deferred`, and `closed` are tab-separated plain text:
+All list views (`list`, `ready`, `deferred`, `closed`) are tab-separated plain text:
 
 ```
 <id>\t<status>\t<blockers-count>\t<assignee>\t<updated>\t<title>
@@ -79,12 +77,31 @@ Read and write it like any file. On write, the frontmatter is parsed and the sto
 
 `-` for zero/empty fields. `<updated>` is `YYYY-MM-DD`.
 
-```sh
-# stale beads (not updated in 30+ days)
-awk -F'\t' '$5 < "2026-03-11"' $bdir/list
+### Querying with standard tools
 
-# beads with a specific label (labels are in the bead file frontmatter)
+```sh
+bdir=~/mnt/beads/$mount
+
+# blocked beads (blockers-count != -)
+awk -F'\t' '$3 != "-"' $bdir/list
+
+# stale beads (not updated in 30+ days)
+awk -F'\t' -v d="$(date -d '30 days ago' +%Y-%m-%d)" '$5 < d' $bdir/list
+
+# beads assigned to a specific agent
+grep -F "myagent" $bdir/ready
+
+# beads by external reference (e.g. Jira key)
+grep "bd-a1b2" $bdir/list
+
+# child beads of a parent
+grep "^bd-a1b2\." $bdir/list
+
+# beads with a specific label
 grep -rl "capability:high" $bdir/
+
+# batch lookup
+grep -F "bd-a1b2\|bd-c3d4" $bdir/list
 ```
 
 ## Examples
@@ -112,12 +129,6 @@ echo "new 'Fix login bug' 'OAuth token not refreshed'" > $bdir/ctl
 # claim / complete
 echo "claim bd-a1b2" > $bdir/ctl
 echo "complete bd-a1b2" > $bdir/ctl
-
-# find beads assigned to an agent
-grep myagent $bdir/ready
-
-# update title without temp file (sed -i unsupported on 9P)
-sed "s/^title: .*/title: New title/" $bdir/bd-a1b2 > $bdir/bd-a1b2
 ```
 
 ## Control Commands
