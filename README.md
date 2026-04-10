@@ -17,7 +17,19 @@ Beads provides persistent, structured task memory for coding agents. Tasks persi
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BEADS_9MOUNT` | `~/mnt/beads` | FUSE mount path |
-| `BEADS_PROJECT_DIRS` | `~/src:~/prj` | Colon-separated list of project parent directories. Mounts must be at most 1 level deep from one of these. |
+| `BEADS_PROJECT_DIRS` | `~/src:~/prj` | Colon-separated list of project parent directories (see below) |
+
+### Project directories
+
+`BEADS_PROJECT_DIRS` tells 9beads where your projects live. Mount paths must be at most 1 level deep from one of these directories. If a path is 2 levels deep, it resolves up to the parent project automatically.
+
+This prevents a common foot gun: accidentally creating separate bead databases for different worktrees or subdirectories of the same project. Three layouts are supported:
+
+- **Repo-based** (`~/src/mycoolapp`) — mounts directly as `mycoolapp`
+- **Worktree-based** (`~/src/mycoolapp/branch-a`) — resolves up to `mycoolapp`, so all worktrees share one bead database
+- **Workspace-based** (`~/src/branch-a/my-monorepo`) — mounts as `my-monorepo` under the workspace directory
+
+Git worktrees (where `.git` is a file, not a directory) are rejected outright — mount the base repo instead.
 
 ## Usage
 
