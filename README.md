@@ -27,7 +27,7 @@ This prevents a common foot gun: accidentally creating separate bead databases f
 
 - **Repo-based** (`~/src/mycoolapp`) — mounts directly as `mycoolapp`
 - **Worktree-based** (`~/src/mycoolapp/branch-a`) — resolves up to `mycoolapp`, so all worktrees share one bead database
-- **Workspace-based** (`~/src/branch-a/my-monorepo`) — mounts as `my-monorepo` under the workspace directory
+- **Workspace-based** (`~/src/my-monorepo-workspace/app1`) — resolves up to `my-monorepo-workspace`, so sub-projects (`app1`, `lib2`, `lib3`, ...) share one bead database instead of each getting their own
 
 Git worktrees (where `.git` is a file, not a directory) are rejected outright — mount the base repo instead.
 
