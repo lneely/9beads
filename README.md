@@ -12,6 +12,13 @@ Beads provides persistent, structured task memory for coding agents. Tasks persi
 
 - [plan9port](https://github.com/lneely/plan9port) (wayland-9pfuse-truncate branch required for `9pfuse` truncate fix)
 
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BEADS_9MOUNT` | `~/mnt/beads` | FUSE mount path |
+| `BEADS_PROJECT_DIRS` | `~/src:~/prj` | Colon-separated list of project parent directories. Mounts must be at most 1 level deep from one of these. |
+
 ## Usage
 
 ```sh
