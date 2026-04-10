@@ -37,9 +37,7 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
     ├── ctl          # mount control (new, claim, complete, etc.)
     ├── cwd          # working directory for this mount
     ├── list         # all open beads
-    ├── list/<n>     # all open beads, limit n
     ├── ready        # ready beads (open, unblocked)
-    ├── ready/<n>    # ready beads, limit n
     ├── deferred     # deferred beads
     ├── closed       # last 100 closed beads
     └── <bead-id>    # bead file (markdown + YAML frontmatter)
