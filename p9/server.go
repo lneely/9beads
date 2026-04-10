@@ -532,8 +532,8 @@ type beadFrontmatter struct {
 	Status   string   `yaml:"status"`
 	Updated  string   `yaml:"updated"`
 	Parent   string   `yaml:"parent"`
-	Labels   []string `yaml:"labels"`
-	Blockers []string `yaml:"blockers"`
+	Labels   []string `yaml:"labels,flow"`
+	Blockers []string `yaml:"blockers,flow"`
 }
 
 func (s *Server) readDir(path string, offset uint64, count uint32) []byte {
