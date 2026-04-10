@@ -74,10 +74,18 @@ Read and write it like any file. On write, the frontmatter is parsed and the sto
 `list`, `ready`, `deferred`, and `closed` are tab-separated plain text:
 
 ```
-<id>\t<status>\t<blockers-count>\t<assignee>\t<title>
+<id>\t<status>\t<blockers-count>\t<assignee>\t<updated>\t<title>
 ```
 
-`-` is used for zero/empty fields.
+`-` for zero/empty fields. `<updated>` is `YYYY-MM-DD`.
+
+```sh
+# stale beads (not updated in 30+ days)
+awk -F'\t' '$5 < "2026-03-11"' $bdir/list
+
+# beads with a specific label (labels are in the bead file frontmatter)
+grep -rl "capability:high" $bdir/
+```
 
 ## Examples
 
