@@ -8,12 +8,12 @@ import (
 
 // ProjectDirs are valid parent directories for beads mounts.
 // Mounts must be exactly 1 level deep from one of these.
-// Set via ANVILLM_PROJECT_DIRS (colon-separated), defaults to ~/src:~/prj.
+// Set via BEADS_PROJECT_DIRS (colon-separated), defaults to ~/src:~/prj.
 var ProjectDirs []string
 
 func init() {
 	home := os.Getenv("HOME")
-	s := os.Getenv("ANVILLM_PROJECT_DIRS")
+	s := os.Getenv("BEADS_PROJECT_DIRS")
 	if s == "" {
 		s = home + "/src:" + home + "/prj"
 	}
