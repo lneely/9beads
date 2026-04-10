@@ -29,24 +29,26 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
 ~/mnt/beads/
 ├── ctl                    # global control (mount, umount)
 ├── mtab                   # mount table: <name>\t<cwd>
-├── ready                  # ready beads across all mounts (plain text)
-├── deferred               # deferred beads across all mounts (plain text)
-├── closed                 # last 100 closed beads across all mounts (plain text)
+├── ready                  # ready beads across all mounts
+├── deferred               # deferred beads across all mounts
+├── closed                 # last 100 closed beads across all mounts
 ├── events                 # event stream (JSON, blocking read)
 └── <mount>/
     ├── ctl                # mount control (create, claim, complete, etc.)
     ├── cwd                # working directory for this mount
-    ├── list               # all open beads (plain text)
-    ├── ready              # ready beads for this mount (plain text)
-    ├── deferred           # deferred beads for this mount (plain text)
-    ├── closed             # last 100 closed beads for this mount (plain text)
-    ├── blocked            # blocked beads (JSON)
-    ├── stale              # stale beads, not updated in 30+ days (JSON)
-    ├── search/<query>     # text search results (JSON)
-    ├── by-ref/<ref>       # bead by external reference (JSON)
-    ├── batch/<id,...>     # batch lookup by IDs (JSON)
-    ├── label/<label>      # beads with label (JSON)
-    ├── children/<id>      # direct children of parent (JSON)
+    ├── list               # all open beads
+    ├── list/<n>           # all open beads, limit n
+    ├── ready              # ready beads (unblocked, open)
+    ├── ready/<n>          # ready beads, limit n
+    ├── deferred           # deferred beads
+    ├── closed             # last 100 closed beads
+    ├── blocked            # blocked beads
+    ├── stale              # beads not updated in 30+ days
+    ├── search/<query>     # text search results
+    ├── by-ref/<ref>       # bead by external reference
+    ├── batch/<id,...>     # batch lookup by IDs
+    ├── label/<label>      # beads with label
+    ├── children/<id>      # direct children of parent
     └── <bead-id>          # bead file (markdown + YAML frontmatter)
 ```
 
