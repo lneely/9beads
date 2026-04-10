@@ -339,16 +339,22 @@ func (s *Server) stat(cs *connState, fc *plan9.Fcall) *plan9.Fcall {
 func (s *Server) clunk(cs *connState, fc *plan9.Fcall) *plan9.Fcall {
 	cs.mu.Lock()
 	f, ok := cs.fids[fc.Fid]
+	var writeErr error
+	var writePath string
 	if ok {
 		if len(f.writeBuf) > 0 {
-			path := f.path
+			writePath = f.path
 			data := make([]byte, len(f.writeBuf))
 			copy(data, f.writeBuf)
-			s.handleWrite(path, data)
+			writeErr = s.handleWrite(writePath, data)
 		}
 		delete(cs.fids, fc.Fid)
 	}
 	cs.mu.Unlock()
+	if writeErr != nil {
+		fmt.Fprintf(os.Stderr, "9beads: %s: %v\n", writePath, writeErr)
+		return rerror(fc, writeErr.Error())
+	}
 	return &plan9.Fcall{Type: plan9.Rclunk, Tag: fc.Tag}
 }
 
@@ -630,56 +636,57 @@ func (s *Server) makeStat(path string) plan9.Dir {
 	return dir
 }
 
-func (s *Server) handleWrite(path string, data []byte) {
+func (s *Server) handleWrite(path string, data []byte) error {
 	input := strings.TrimSpace(string(data))
 	if input == "" {
-		return
+		return nil
 	}
 	if path == "/ctl" {
-		s.handleRootCtl(input)
-		return
+		return s.handleRootCtl(input)
 	}
 	trimmed := strings.TrimPrefix(path, "/")
 	parts := strings.SplitN(trimmed, "/", 3)
 	if len(parts) < 2 {
-		return
+		return fmt.Errorf("invalid path: %s", path)
 	}
 	s.mu.RLock()
 	m, ok := s.mounts[parts[0]]
 	s.mu.RUnlock()
 	if !ok {
-		return
+		return fmt.Errorf("mount not found: %s", parts[0])
 	}
 	if parts[1] == "ctl" {
-		s.handleMountCtl(m, input)
-		return
+		return s.handleMountCtl(m, input)
 	}
-	s.handleBeadWrite(m, parts[1], data)
+	return s.handleBeadWrite(m, parts[1], data)
 }
 
-func (s *Server) handleRootCtl(input string) {
+func (s *Server) handleRootCtl(input string) error {
 	args, err := ParseArgs(input)
-	if err != nil || len(args) == 0 {
-		return
+	if err != nil {
+		return fmt.Errorf("parse error: %w", err)
+	}
+	if len(args) == 0 {
+		return fmt.Errorf("empty command")
 	}
 	switch args[0] {
 	case "mount":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "9beads: mount requires <cwd>\n")
-			return
+			return fmt.Errorf("mount requires <cwd>")
 		}
 		cwd := args[1]
 		name := ""
 		if len(args) >= 3 {
 			name = args[2]
 		}
-		s.doMount(cwd, name)
+		return s.doMount(cwd, name)
 	case "umount":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "9beads: umount requires <name|cwd>\n")
-			return
+			return fmt.Errorf("umount requires <name|cwd>")
 		}
-		s.doUmount(args[1])
+		return s.doUmount(args[1])
+	default:
+		return fmt.Errorf("unknown global command: %s", args[0])
 	}
 }
 
@@ -695,7 +702,11 @@ func shortID() string {
 	return fmt.Sprintf("%x", b)
 }
 
-func (s *Server) doMount(cwd, name string) {
+func (s *Server) doMount(cwd, name string) error {
+	// Check if cwd exists
+	if _, err := os.Stat(cwd); err != nil {
+		return fmt.Errorf("directory does not exist: %s", cwd)
+	}
 	// Validate and resolve cwd against ProjectDirs
 	if len(config.ProjectDirs) > 0 {
 		resolved := false
@@ -719,8 +730,7 @@ func (s *Server) doMount(cwd, name string) {
 			}
 		}
 		if !resolved {
-			fmt.Fprintf(os.Stderr, "9beads: mount path must be at most 1 level below a project dir (%v)\n", config.ProjectDirs)
-			return
+			return fmt.Errorf("mount path must be at most 1 level below a project dir (%v)", config.ProjectDirs)
 		}
 	}
 
@@ -732,8 +742,7 @@ func (s *Server) doMount(cwd, name string) {
 	_, exists := s.mounts[name]
 	s.mu.RUnlock()
 	if exists {
-		fmt.Fprintf(os.Stderr, "9beads: mount %q already exists\n", name)
-		return
+		return fmt.Errorf("mount %q already exists", name)
 	}
 
 	// Reject if cwd already mounted
@@ -741,8 +750,7 @@ func (s *Server) doMount(cwd, name string) {
 	for _, m := range s.mounts {
 		if m.cwd == cwd {
 			s.mu.RUnlock()
-			fmt.Fprintf(os.Stderr, "9beads: path already mounted as %s\n", m.name)
-			return
+			return fmt.Errorf("path already mounted as %s", m.name)
 		}
 	}
 	s.mu.RUnlock()
@@ -754,8 +762,7 @@ func (s *Server) doMount(cwd, name string) {
 		doltPath := filepath.Join(beadsPath, "dolt")
 		store, err = beads.Open(ctx, doltPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "9beads: failed to open store for %s: %v\n", cwd, err)
-			return
+			return fmt.Errorf("failed to open store for %s: %v", cwd, err)
 		}
 	}
 	m := &mount{name: name, cwd: cwd, store: store}
@@ -764,78 +771,81 @@ func (s *Server) doMount(cwd, name string) {
 	s.mu.Unlock()
 	s.events.append(map[string]string{"type": "mount", "name": name, "cwd": cwd})
 	fmt.Fprintf(os.Stderr, "9beads: mounted %s (%s)\n", name, cwd)
+	return nil
 }
 
-func (s *Server) doUmount(nameOrCwd string) {
+func (s *Server) doUmount(nameOrCwd string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if m, ok := s.mounts[nameOrCwd]; ok {
 		m.store.Close()
 		delete(s.mounts, nameOrCwd)
 		s.events.append(map[string]string{"type": "umount", "name": nameOrCwd})
-		return
+		return nil
 	}
 	for name, m := range s.mounts {
 		if m.cwd == nameOrCwd {
 			m.store.Close()
 			delete(s.mounts, name)
 			s.events.append(map[string]string{"type": "umount", "name": name})
-			return
+			return nil
 		}
 	}
-	fmt.Fprintf(os.Stderr, "9beads: umount: %q not found\n", nameOrCwd)
+	return fmt.Errorf("umount: %q not found", nameOrCwd)
 }
 
-func (s *Server) handleMountCtl(m *mount, input string) {
+func (s *Server) handleMountCtl(m *mount, input string) error {
 	args, err := ParseArgs(input)
-	if err != nil || len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "9beads: ctl parse error: %v\n", err)
-		return
+	if err != nil {
+		return fmt.Errorf("parse error: %w", err)
+	}
+	if len(args) == 0 {
+		return fmt.Errorf("empty command")
 	}
 	ctx := context.Background()
 	cmd := args[0]
 	args = args[1:]
 	switch cmd {
 	case "new":
-		s.cmdNew(ctx, m, args)
+		return s.cmdNew(ctx, m, args)
 	case "claim":
-		s.cmdClaim(ctx, m, args)
+		return s.cmdClaim(ctx, m, args)
 	case "unclaim":
-		s.cmdUnclaim(ctx, m, args)
+		return s.cmdUnclaim(ctx, m, args)
 	case "open":
-		s.cmdOpen(ctx, m, args)
+		return s.cmdOpen(ctx, m, args)
 	case "defer":
-		s.cmdDefer(ctx, m, args)
+		return s.cmdDefer(ctx, m, args)
 	case "reopen":
-		s.cmdReopen(ctx, m, args)
+		return s.cmdReopen(ctx, m, args)
 	case "complete":
-		s.cmdComplete(ctx, m, args)
+		return s.cmdComplete(ctx, m, args)
 	case "fail":
-		s.cmdFail(ctx, m, args)
+		return s.cmdFail(ctx, m, args)
 	case "update":
-		s.cmdUpdate(ctx, m, args)
+		return s.cmdUpdate(ctx, m, args)
 	case "delete":
-		s.cmdDelete(ctx, m, args)
+		return s.cmdDelete(ctx, m, args)
 	case "comment":
-		s.cmdComment(ctx, m, args)
+		return s.cmdComment(ctx, m, args)
 	case "label":
-		s.cmdLabel(ctx, m, args)
+		return s.cmdLabel(ctx, m, args)
 	case "unlabel":
-		s.cmdUnlabel(ctx, m, args)
+		return s.cmdUnlabel(ctx, m, args)
 	case "set-capability":
-		s.cmdSetCapability(ctx, m, args)
+		return s.cmdSetCapability(ctx, m, args)
 	case "dep":
-		s.cmdDep(ctx, m, args)
+		return s.cmdDep(ctx, m, args)
 	case "undep":
-		s.cmdUndep(ctx, m, args)
+		return s.cmdUndep(ctx, m, args)
 	case "relate":
-		s.cmdRelate(ctx, m, args)
+		return s.cmdRelate(ctx, m, args)
 	case "init":
-		s.cmdInit(ctx, m, args)
+		return s.cmdInit(ctx, m, args)
 	case "batch-create":
-		s.cmdBatchCreate(ctx, m, args)
+		return s.cmdBatchCreate(ctx, m, args)
 	default:
-		fmt.Fprintf(os.Stderr, "9beads: unknown command %q\n", cmd)
+		return fmt.Errorf("unknown command %q", cmd)
 	}
 }
 
@@ -879,10 +889,9 @@ func (s *Server) generateID(ctx context.Context, m *mount, parent string) string
 	return prefix + "-" + id
 }
 
-func (s *Server) cmdNew(ctx context.Context, m *mount, args []string) {
+func (s *Server) cmdNew(ctx context.Context, m *mount, args []string) error {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "9beads: new requires title\n")
-		return
+		return fmt.Errorf("new requires title")
 	}
 	title := args[0]
 	desc := ""
@@ -905,8 +914,7 @@ func (s *Server) cmdNew(ctx context.Context, m *mount, args []string) {
 		issue.SpecID = v
 	}
 	if err := m.store.CreateIssue(ctx, issue, "9beads"); err != nil {
-		fmt.Fprintf(os.Stderr, "9beads: new: %v\n", err)
-		return
+		return fmt.Errorf("new: %w", err)
 	}
 	if v, ok := kv["capability"]; ok {
 		m.store.AddLabel(ctx, id, "capability:"+v, "9beads")
@@ -929,137 +937,140 @@ func (s *Server) cmdNew(ctx context.Context, m *mount, args []string) {
 		}
 	}
 	s.events.append(map[string]string{"type": "created", "id": id, "mount": m.name})
+	return nil
 }
 
-func (s *Server) cmdClaim(ctx context.Context, m *mount, args []string) {
-	if len(args) < 1 { return }
+func (s *Server) cmdClaim(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 1 { return fmt.Errorf("claim requires <id>") }
 	assignee := "9beads"
 	if len(args) >= 2 { assignee = args[1] }
-	m.store.UpdateIssue(ctx, args[0], map[string]interface{}{
+	if err := m.store.UpdateIssue(ctx, args[0], map[string]interface{}{
 		"status": string(beads.StatusInProgress), "assignee": assignee,
-	}, "9beads")
+	}, "9beads"); err != nil { return err }
 	s.events.append(map[string]string{"type": "claimed", "id": args[0], "mount": m.name})
+	return nil
 }
 
-func (s *Server) cmdUnclaim(ctx context.Context, m *mount, args []string) {
-	if len(args) < 1 { return }
-	m.store.UpdateIssue(ctx, args[0], map[string]interface{}{
+func (s *Server) cmdUnclaim(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 1 { return fmt.Errorf("unclaim requires <id>") }
+	return m.store.UpdateIssue(ctx, args[0], map[string]interface{}{
 		"status": string(beads.StatusOpen), "assignee": "",
 	}, "9beads")
 }
 
-func (s *Server) cmdOpen(ctx context.Context, m *mount, args []string) {
-	if len(args) < 1 { return }
-	m.store.UpdateIssue(ctx, args[0], map[string]interface{}{"status": string(beads.StatusOpen)}, "9beads")
+func (s *Server) cmdOpen(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 1 { return fmt.Errorf("open requires <id>") }
+	return m.store.UpdateIssue(ctx, args[0], map[string]interface{}{"status": string(beads.StatusOpen)}, "9beads")
 }
 
-func (s *Server) cmdDefer(ctx context.Context, m *mount, args []string) {
-	if len(args) < 1 { return }
+func (s *Server) cmdDefer(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 1 { return fmt.Errorf("defer requires <id>") }
 	updates := map[string]interface{}{"status": string(beads.StatusDeferred)}
 	if len(args) >= 3 && args[1] == "until" {
 		if t, err := time.Parse(time.RFC3339, args[2]); err == nil {
 			updates["defer_until"] = t
 		}
 	}
-	m.store.UpdateIssue(ctx, args[0], updates, "9beads")
+	return m.store.UpdateIssue(ctx, args[0], updates, "9beads")
 }
 
-func (s *Server) cmdReopen(ctx context.Context, m *mount, args []string) {
-	if len(args) < 1 { return }
-	m.store.UpdateIssue(ctx, args[0], map[string]interface{}{"status": string(beads.StatusOpen)}, "9beads")
+func (s *Server) cmdReopen(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 1 { return fmt.Errorf("reopen requires <id>") }
+	return m.store.UpdateIssue(ctx, args[0], map[string]interface{}{"status": string(beads.StatusOpen)}, "9beads")
 }
 
-func (s *Server) cmdComplete(ctx context.Context, m *mount, args []string) {
-	if len(args) < 1 { return }
-	m.store.CloseIssue(ctx, args[0], "completed", "9beads", "")
+func (s *Server) cmdComplete(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 1 { return fmt.Errorf("complete requires <id>") }
+	if err := m.store.CloseIssue(ctx, args[0], "completed", "9beads", ""); err != nil { return err }
 	s.events.append(map[string]string{"type": "completed", "id": args[0], "mount": m.name})
+	return nil
 }
 
-func (s *Server) cmdFail(ctx context.Context, m *mount, args []string) {
-	if len(args) < 1 { return }
+func (s *Server) cmdFail(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 1 { return fmt.Errorf("fail requires <id>") }
 	reason := "failed"
 	if len(args) >= 2 { reason = args[1] }
-	m.store.CloseIssue(ctx, args[0], reason, "9beads", "")
+	if err := m.store.CloseIssue(ctx, args[0], reason, "9beads", ""); err != nil { return err }
 	s.events.append(map[string]string{"type": "failed", "id": args[0], "mount": m.name})
+	return nil
 }
 
-func (s *Server) cmdUpdate(ctx context.Context, m *mount, args []string) {
+func (s *Server) cmdUpdate(ctx context.Context, m *mount, args []string) error {
 	if len(args) < 3 {
-		fmt.Fprintf(os.Stderr, "9beads: update requires <id> <field> <value>\n")
-		return
+		return fmt.Errorf("update requires <id> <field> <value>")
 	}
 	if args[1] == "status" || args[1] == "assignee" {
-		fmt.Fprintf(os.Stderr, "9beads: update cannot change %s\n", args[1])
-		return
+		return fmt.Errorf("update cannot change %s (use claim/complete/defer)", args[1])
 	}
-	m.store.UpdateIssue(ctx, args[0], map[string]interface{}{args[1]: args[2]}, "9beads")
+	return m.store.UpdateIssue(ctx, args[0], map[string]interface{}{args[1]: args[2]}, "9beads")
 }
 
-func (s *Server) cmdDelete(ctx context.Context, m *mount, args []string) {
-	if len(args) < 1 { return }
-	m.store.DeleteIssue(ctx, args[0])
+func (s *Server) cmdDelete(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 1 { return fmt.Errorf("delete requires <id>") }
+	if err := m.store.DeleteIssue(ctx, args[0]); err != nil { return err }
 	s.events.append(map[string]string{"type": "deleted", "id": args[0], "mount": m.name})
+	return nil
 }
 
-func (s *Server) cmdComment(ctx context.Context, m *mount, args []string) {
-	if len(args) < 2 { return }
-	m.store.AddIssueComment(ctx, args[0], "9beads", args[1])
+func (s *Server) cmdComment(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 2 { return fmt.Errorf("comment requires <id> <text>") }
+	_, err := m.store.AddIssueComment(ctx, args[0], "9beads", args[1])
+	return err
 }
 
-func (s *Server) cmdLabel(ctx context.Context, m *mount, args []string) {
-	if len(args) < 2 { return }
-	m.store.AddLabel(ctx, args[0], args[1], "9beads")
+func (s *Server) cmdLabel(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 2 { return fmt.Errorf("label requires <id> <label>") }
+	return m.store.AddLabel(ctx, args[0], args[1], "9beads")
 }
 
-func (s *Server) cmdUnlabel(ctx context.Context, m *mount, args []string) {
-	if len(args) < 2 { return }
-	m.store.RemoveLabel(ctx, args[0], args[1], "9beads")
+func (s *Server) cmdUnlabel(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 2 { return fmt.Errorf("unlabel requires <id> <label>") }
+	return m.store.RemoveLabel(ctx, args[0], args[1], "9beads")
 }
 
-func (s *Server) cmdSetCapability(ctx context.Context, m *mount, args []string) {
-	if len(args) < 2 { return }
+func (s *Server) cmdSetCapability(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 2 { return fmt.Errorf("set-capability requires <id> <level>") }
 	labels, _ := m.store.GetLabels(ctx, args[0])
 	for _, l := range labels {
 		if strings.HasPrefix(l, "capability:") {
 			m.store.RemoveLabel(ctx, args[0], l, "9beads")
 		}
 	}
-	m.store.AddLabel(ctx, args[0], "capability:"+args[1], "9beads")
+	return m.store.AddLabel(ctx, args[0], "capability:"+args[1], "9beads")
 }
 
-func (s *Server) cmdDep(ctx context.Context, m *mount, args []string) {
-	if len(args) < 2 { return }
-	m.store.AddDependency(ctx, &beads.Dependency{
+func (s *Server) cmdDep(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 2 { return fmt.Errorf("dep requires <child-id> <parent-id>") }
+	return m.store.AddDependency(ctx, &beads.Dependency{
 		IssueID: args[0], DependsOnID: args[1], Type: beads.DepBlocks,
 		CreatedAt: time.Now(), CreatedBy: "9beads",
 	}, "9beads")
 }
 
-func (s *Server) cmdUndep(ctx context.Context, m *mount, args []string) {
-	if len(args) < 2 { return }
-	m.store.RemoveDependency(ctx, args[0], args[1], "9beads")
+func (s *Server) cmdUndep(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 2 { return fmt.Errorf("undep requires <child-id> <parent-id>") }
+	return m.store.RemoveDependency(ctx, args[0], args[1], "9beads")
 }
 
-func (s *Server) cmdRelate(ctx context.Context, m *mount, args []string) {
-	if len(args) < 2 { return }
-	m.store.AddDependency(ctx, &beads.Dependency{
+func (s *Server) cmdRelate(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 2 { return fmt.Errorf("relate requires <id1> <id2>") }
+	return m.store.AddDependency(ctx, &beads.Dependency{
 		IssueID: args[0], DependsOnID: args[1], Type: beads.DepRelated,
 		CreatedAt: time.Now(), CreatedBy: "9beads",
 	}, "9beads")
 }
 
-func (s *Server) cmdInit(ctx context.Context, m *mount, args []string) {
+func (s *Server) cmdInit(ctx context.Context, m *mount, args []string) error {
 	prefix := "bd"
 	if len(args) >= 1 { prefix = args[0] }
-	m.store.SetConfig(ctx, "issue_prefix", prefix)
+	return m.store.SetConfig(ctx, "issue_prefix", prefix)
 }
 
-func (s *Server) cmdBatchCreate(ctx context.Context, m *mount, args []string) {
-	if len(args) < 1 { return }
+func (s *Server) cmdBatchCreate(ctx context.Context, m *mount, args []string) error {
+	if len(args) < 1 { return fmt.Errorf("batch-create requires <json-array>") }
 	batch, err := ParseBatchCreate(strings.Join(args, " "))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "9beads: batch-create: %v\n", err)
-		return
+		return fmt.Errorf("batch-create: %w", err)
 	}
 	for _, item := range batch {
 		title, _ := item["title"].(string)
@@ -1067,17 +1078,17 @@ func (s *Server) cmdBatchCreate(ctx context.Context, m *mount, args []string) {
 		desc, _ := item["description"].(string)
 		newArgs := []string{title}
 		if desc != "" { newArgs = append(newArgs, desc) }
-		s.cmdNew(ctx, m, newArgs)
+		if err := s.cmdNew(ctx, m, newArgs); err != nil { return err }
 	}
+	return nil
 }
 
-func (s *Server) handleBeadWrite(m *mount, id string, data []byte) {
+func (s *Server) handleBeadWrite(m *mount, id string, data []byte) error {
 	content := string(data)
 	if !strings.HasPrefix(content, "---\n") {
-		m.store.UpdateIssue(context.Background(), id, map[string]interface{}{
+		return m.store.UpdateIssue(context.Background(), id, map[string]interface{}{
 			"description": strings.TrimSpace(content),
 		}, "9beads")
-		return
 	}
 	rest := content[4:]
 	endIdx := strings.Index(rest, "\n---\n")
@@ -1086,7 +1097,7 @@ func (s *Server) handleBeadWrite(m *mount, id string, data []byte) {
 			endIdx = strings.LastIndex(rest, "---")
 		}
 		if endIdx < 0 {
-			return
+			return fmt.Errorf("invalid frontmatter: missing closing ---")
 		}
 	}
 	fmStr := rest[:endIdx]
@@ -1096,8 +1107,7 @@ func (s *Server) handleBeadWrite(m *mount, id string, data []byte) {
 	}
 	var fm beadFrontmatter
 	if err := yaml.Unmarshal([]byte(fmStr), &fm); err != nil {
-		fmt.Fprintf(os.Stderr, "9beads: parse frontmatter for %s: %v\n", id, err)
-		return
+		return fmt.Errorf("parse frontmatter for %s: %w", id, err)
 	}
 	ctx := context.Background()
 	updates := map[string]interface{}{
@@ -1107,7 +1117,9 @@ func (s *Server) handleBeadWrite(m *mount, id string, data []byte) {
 	if fm.Status != "" {
 		updates["status"] = fm.Status
 	}
-	m.store.UpdateIssue(ctx, id, updates, "9beads")
+	if err := m.store.UpdateIssue(ctx, id, updates, "9beads"); err != nil {
+		return err
+	}
 	if fm.Labels != nil {
 		existing, _ := m.store.GetLabels(ctx, id)
 		existSet := make(map[string]bool)
@@ -1142,4 +1154,5 @@ func (s *Server) handleBeadWrite(m *mount, id string, data []byte) {
 		}
 	}
 	s.events.append(map[string]string{"type": "updated", "id": id, "mount": m.name})
+	return nil
 }
