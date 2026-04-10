@@ -31,7 +31,7 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
 ├── mtab             # mount table: <name>\t<cwd>
 ├── ready            # ready beads across all mounts
 ├── deferred         # deferred beads across all mounts
-├── closed           # last 100 closed beads across all mounts
+├── closed           # closed beads across all mounts
 ├── events           # event stream (JSON, blocking read)
 └── <mount>/
     ├── ctl          # mount control (new, claim, complete, etc.)
@@ -39,7 +39,7 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
     ├── list         # all open beads
     ├── ready        # ready beads (open, unblocked)
     ├── deferred     # deferred beads
-    ├── closed       # last 100 closed beads
+    ├── closed       # closed beads
     └── <bead-id>    # bead file (markdown + YAML frontmatter)
 ```
 
