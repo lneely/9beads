@@ -41,9 +41,7 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
     ├── deferred     # deferred beads
     ├── closed       # closed beads
     ├── comments/    # per-bead comments
-    │   └── <bead-id>/
-    │       ├── list         # all comments (separated by ---)
-    │       └── <comment-id> # individual comment
+    │   └── <bead-id>    # all comments (separated by ---)
     └── <bead-id>    # bead file (markdown + YAML frontmatter)
 ```
 
@@ -81,7 +79,7 @@ All list views (`list`, `ready`, `deferred`, `closed`) are tab-separated plain t
 
 ### Comments
 
-Comments are accessed via `<mount>/comments/<bead-id>/`. The `list` file shows all comments separated by `---`:
+Comments are accessed via `<mount>/comments/<bead-id>`:
 
 ```
 author1	2026-04-01 14:30
@@ -92,7 +90,7 @@ author2	2026-04-02 09:15
 Second comment text.
 ```
 
-Individual comments are available as `<mount>/comments/<bead-id>/<comment-id>`. All beads with comments are listed regardless of status.
+All beads with comments are listed in `<mount>/comments/` regardless of status.
 
 ### Querying with standard tools
 
@@ -149,7 +147,7 @@ echo "complete bd-a1b2" > $bdir/ctl
 
 # add and read comments
 echo "comment bd-a1b2 'Fixed in commit abc123'" > $bdir/ctl
-cat $bdir/comments/bd-a1b2/list
+cat $bdir/comments/bd-a1b2
 ```
 
 ## Control Commands

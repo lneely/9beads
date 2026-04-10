@@ -184,30 +184,14 @@ func (s *Server) pathType(path string) string {
 			}
 		}
 	case len(parts) == 3 && parts[1] == "comments":
-		// /mount/comments/<bead-id> — dir of comments
+		// /mount/comments/<bead-id> — file listing all comments
 		s.mu.RLock()
 		m, ok := s.mounts[parts[0]]
 		s.mu.RUnlock()
 		if ok {
 			issue, err := m.store.GetIssue(context.Background(), parts[2])
 			if err == nil && issue != nil {
-				return "dir"
-			}
-		}
-	case len(parts) == 4 && parts[1] == "comments":
-		// /mount/comments/<bead-id>/list or /mount/comments/<bead-id>/<comment-id>
-		s.mu.RLock()
-		m, ok := s.mounts[parts[0]]
-		s.mu.RUnlock()
-		if ok {
-			if parts[3] == "list" {
 				return "file"
-			}
-			comments, _ := m.store.GetIssueComments(context.Background(), parts[2])
-			for _, c := range comments {
-				if c.ID == parts[3] {
-					return "file"
-				}
 			}
 		}
 	}
@@ -447,12 +431,9 @@ func (s *Server) readFile(path string) []byte {
 			return s.readBead(ctx, m, parts[1])
 		}
 	}
-	// /mount/comments/<bead-id>/list or /mount/comments/<bead-id>/<comment-id>
-	if len(parts) == 4 && parts[1] == "comments" {
-		if parts[3] == "list" {
-			return s.readCommentList(ctx, m, parts[2])
-		}
-		return s.readComment(ctx, m, parts[2], parts[3])
+	// /mount/comments/<bead-id>
+	if len(parts) == 3 && parts[1] == "comments" {
+		return s.readCommentList(ctx, m, parts[2])
 	}
 	return nil
 }
@@ -562,19 +543,6 @@ func (s *Server) readBead(ctx context.Context, m *mount, id string) []byte {
 	return []byte(b.String())
 }
 
-func (s *Server) readComment(ctx context.Context, m *mount, beadID, commentID string) []byte {
-	comments, err := m.store.GetIssueComments(ctx, beadID)
-	if err != nil {
-		return nil
-	}
-	for _, c := range comments {
-		if c.ID == commentID {
-			return []byte(fmt.Sprintf("%s\t%s\n%s\n", c.Author, c.CreatedAt.Format("2006-01-02 15:04"), c.Text))
-		}
-	}
-	return nil
-}
-
 func (s *Server) readCommentList(ctx context.Context, m *mount, beadID string) []byte {
 	comments, err := m.store.GetIssueComments(ctx, beadID)
 	if err != nil || len(comments) == 0 {
@@ -644,23 +612,14 @@ func (s *Server) readDir(path string, offset uint64, count uint32) []byte {
 				dirs = append(dirs, mk(iss.ID, path+"/"+iss.ID, false, 0666))
 			}
 		} else if ok && len(parts) == 2 && parts[1] == "comments" {
-			// /mount/comments — list bead IDs that have comments
+			// /mount/comments — list bead IDs that have comments (as files)
 			ctx := context.Background()
 			issues, _ := m.store.SearchIssues(ctx, "", beads.IssueFilter{})
 			for _, iss := range issues {
 				comments, _ := m.store.GetIssueComments(ctx, iss.ID)
 				if len(comments) > 0 {
-					dirs = append(dirs, mk(iss.ID, path+"/"+iss.ID, true, plan9.DMDIR|0555))
+					dirs = append(dirs, mk(iss.ID, path+"/"+iss.ID, false, 0444))
 				}
-			}
-		} else if ok && len(parts) == 3 && parts[1] == "comments" {
-			// /mount/comments/<bead-id> — list file + comment IDs
-			ctx := context.Background()
-			dirs = append(dirs, mk("list", path+"/list", false, 0444))
-			comments, _ := m.store.GetIssueComments(ctx, parts[2])
-			for _, c := range comments {
-				cid := c.ID
-				dirs = append(dirs, mk(cid, path+"/"+cid, false, 0444))
 			}
 		}
 	}
