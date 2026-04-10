@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -801,14 +802,22 @@ func (s *Server) doMount(cwd, name string) error {
 	s.mu.RUnlock()
 
 	beadsPath := cwdToBeadsDir(s.beadsDir, cwd)
+	if err := os.MkdirAll(beadsPath, 0750); err != nil {
+		return fmt.Errorf("failed to create beads dir for %s: %v", cwd, err)
+	}
 	ctx := context.Background()
-	store, err := beads.OpenFromConfig(ctx, beadsPath)
+	store, err := func() (st beads.Storage, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "9beads: panic opening store for %s: %v\n%s", cwd, r, debug.Stack())
+				err = fmt.Errorf("panic opening store: %v", r)
+			}
+		}()
+		st, err = beads.OpenFromConfig(ctx, beadsPath)
+		return
+	}()
 	if err != nil {
-		doltPath := filepath.Join(beadsPath, "dolt")
-		store, err = beads.Open(ctx, doltPath)
-		if err != nil {
-			return fmt.Errorf("failed to open store for %s: %v", cwd, err)
-		}
+		return fmt.Errorf("failed to open store for %s: %v", cwd, err)
 	}
 	m := &mount{name: name, cwd: cwd, store: store}
 	s.mu.Lock()
