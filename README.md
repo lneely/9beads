@@ -46,7 +46,6 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
 
 ```
 ~/mnt/beads/
-├── ctl              # global control (mount, umount)
 ├── mount            # write-only: echo /path/to/project > mount
 ├── umount           # write-only: echo <name|path> > umount
 ├── mtab             # mount table: <name>\t<cwd>
@@ -55,7 +54,6 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
 ├── closed           # closed beads across all mounts
 ├── events           # event stream (JSON, blocking read)
 └── <mount>/
-    ├── ctl          # mount control (fallback for all commands)
     ├── cwd          # working directory for this mount
     ├── list         # all open beads
     ├── ready        # ready beads (open, unblocked)
@@ -66,6 +64,7 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
     ├── unclaim      # write-only: echo <id>
     ├── open         # write-only: echo <id>
     ├── defer        # write-only: echo <id> [until=<RFC3339>]
+    ├── reopen       # write-only: echo <id>
     ├── complete     # write-only: echo <id>
     ├── fail         # write-only: echo <id> [reason=<text>]
     ├── label        # write-only: echo "<id> key:value"
@@ -77,7 +76,7 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
     ├── delete       # write-only: echo <id>
     ├── comments/    # per-bead comments
     │   └── <bead-id>    # all comments (separated by ---)
-    └── <bead-id>    # bead file (markdown + YAML frontmatter)
+    └── <bead-id>    # bead file (read/write: YAML frontmatter + body)
 ```
 
 ### Bead files
@@ -194,13 +193,10 @@ cat $bdir/bd-a1b2
 # edit a bead (title, status, blockers, description)
 $EDITOR $bdir/bd-a1b2
 
-# create a bead via the new endpoint
+# create a bead
 cat $bdir/new > /tmp/bead.md
 # edit /tmp/bead.md, then:
 cat /tmp/bead.md > $bdir/new
-
-# create a bead via ctl (legacy)
-echo "new 'Fix login bug' 'OAuth token not refreshed'" > $bdir/ctl
 
 # claim / complete / fail
 echo bd-a1b2 > $bdir/claim
@@ -226,28 +222,35 @@ echo bd-a1b2 > $bdir/delete
 # set ID prefix for new beads
 echo myproj > $bdir/init
 
-# add and read comments
-echo "comment bd-a1b2 'Fixed in commit abc123'" > $bdir/ctl
+# read comments
 cat $bdir/comments/bd-a1b2
 ```
 
-## Control Commands
+## Commands
 
-Most commands are available as direct write-only files in `<mount>/` (preferred) or via `<mount>/ctl` (fallback). Direct files accept `<id> [key=value ...]`; `ctl` uses the legacy command-prefix format. Arguments support single/double quotes and backslash escaping (including unicode).
+All operations use write-only files. Arguments support single/double quotes and backslash escaping (including unicode).
 
 ### Labels
 
-Labels are `key:value` strings (e.g. `capability:high`, `area:auth`). `set-capability` in `ctl` is just a convenience wrapper around `label`/`unlabel` — prefer `label` directly.
+Labels are `key:value` strings — e.g. `capability:high`, `area:auth`, `team:platform`. There is no separate capability concept; it is just a label with the `capability:` prefix.
 
-### Direct file endpoints (`<mount>/<command>`)
+### Mount management
+
+| File | Input | Description |
+|------|-------|-------------|
+| `beads/mount` | `/path/to/project` | Mount a project |
+| `beads/umount` | `<name\|path>` | Unmount by name or path |
+
+### Bead operations (`beads/<mount>/<command>`)
 
 | File | Input format | Description |
 |------|-------------|-------------|
-| `new` | *(frontmatter file)* | Create bead — see [Bead files](#bead-files) |
+| `new` | *(frontmatter+body)* | Create bead — see [Bead files](#bead-files) |
 | `claim` | `<id> [assignee=<name>]` | Claim bead (sets assignee + in_progress) |
 | `unclaim` | `<id>` | Release claim (resets to open) |
 | `open` | `<id>` | Promote deferred bead to open |
 | `defer` | `<id> [until=<RFC3339>]` | Defer bead |
+| `reopen` | `<id>` | Reopen a closed bead |
 | `complete` | `<id>` | Mark completed |
 | `fail` | `<id> [reason=<text>]` | Mark failed |
 | `label` | `<id> <key:value>` | Add label |
@@ -255,47 +258,10 @@ Labels are `key:value` strings (e.g. `capability:high`, `area:auth`). `set-capab
 | `dep` | `<id> <parent-id>` | Add blocking dependency |
 | `undep` | `<id> <parent-id>` | Remove dependency |
 | `relate` | `<id1> <id2>` | Add relates-to link |
-| `init` | `<prefix>` | Set ID prefix (default: bd) |
+| `init` | `<prefix>` | Set ID prefix for new beads (default: bd) |
 | `delete` | `<id>` | Delete bead |
 
-### `ctl` commands (`<mount>/ctl`)
-
-| Command | Format | Description |
-|---------|--------|-------------|
-| `new` | `new 'title' ['desc'] [parent-id] [capability=low\|standard\|high] [scope=<s>] [blockers=id,...]` | Create bead |
-| `claim` | `claim <id> [assignee]` | Claim bead |
-| `unclaim` | `unclaim <id>` | Release claim |
-| `open` | `open <id>` | Promote deferred bead to open |
-| `defer` | `defer <id> [until <RFC3339>]` | Defer bead |
-| `reopen` | `reopen <id>` | Reopen closed bead |
-| `complete` | `complete <id>` | Mark completed |
-| `fail` | `fail <id> 'reason'` | Mark failed |
-| `update` | `update <id> <field> 'value'` | Update a field (not status/assignee) |
-| `delete` | `delete <id>` | Delete bead |
-| `comment` | `comment <id> 'text'` | Add comment |
-| `label` | `label <id> 'key:value'` | Add label |
-| `unlabel` | `unlabel <id> 'key:value'` | Remove label |
-| `set-capability` | `set-capability <id> low\|standard\|high` | Shorthand for `label`/`unlabel capability:*` |
-| `dep` | `dep <child-id> <parent-id>` | Add blocking dependency |
-| `undep` | `undep <child-id> <parent-id>` | Remove dependency |
-| `relate` | `relate <id1> <id2>` | Add relates-to link |
-| `init` | `init [prefix]` | Set ID prefix (default: bd) |
-| `batch-create` | `batch-create <json-array>` | Create multiple beads |
-
-Written to global `ctl`:
-
-| Command | Format | Description |
-|---------|--------|-------------|
-| `mount` | `mount <cwd> [name]` | Mount a project |
-| `umount` | `umount <name\|cwd>` | Unmount a project |
-
-The `mount` and `umount` files accept the argument directly, without a command prefix:
-
-```sh
-echo /path/to/project > $mnt/mount
-echo myproject > $mnt/umount
-echo /path/to/project > $mnt/umount
-```
+Editing a bead's title, status, description, labels, or blockers is done by writing directly to its file — `beads/<mount>/<bead-id>`.
 
 ## See Also
 

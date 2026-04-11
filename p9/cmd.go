@@ -2,7 +2,6 @@
 package p9
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -120,11 +119,3 @@ func ParseKV(args []string) ([]string, map[string]string) {
 	return pos, kv
 }
 
-// ParseBatchCreate parses a JSON array of bead creation objects.
-func ParseBatchCreate(jsonStr string) ([]map[string]interface{}, error) {
-	var batch []map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &batch); err != nil {
-		return nil, fmt.Errorf("invalid JSON array: %w", err)
-	}
-	return batch, nil
-}

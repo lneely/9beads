@@ -32,7 +32,7 @@ const (
 // mountWriteEndpoints are write-only files that appear in each mount directory.
 // Each accepts a bead ID as its first argument (except "init").
 var mountWriteEndpoints = []string{
-	"claim", "unclaim", "open", "defer", "complete", "fail",
+	"claim", "unclaim", "open", "defer", "reopen", "complete", "fail",
 	"label", "unlabel", "dep", "undep", "relate", "init", "delete",
 }
 
@@ -162,7 +162,7 @@ func (s *Server) pathType(path string) string {
 	switch {
 	case len(parts) == 1:
 		switch parts[0] {
-		case "ctl", "mount", "umount", "mtab", "ready", "deferred", "closed", "events":
+		case "mount", "umount", "mtab", "ready", "deferred", "closed", "events":
 			return "file"
 		default:
 			s.mu.RLock()
@@ -180,7 +180,7 @@ func (s *Server) pathType(path string) string {
 			return ""
 		}
 		switch parts[1] {
-		case "ctl", "cwd", "list", "ready", "deferred", "closed", "new":
+		case "cwd", "list", "ready", "deferred", "closed", "new":
 			return "file"
 		case "comments":
 			return "dir"
@@ -398,8 +398,6 @@ func (s *Server) readFile(path string) []byte {
 	ctx := context.Background()
 	if len(parts) == 1 {
 		switch parts[0] {
-		case "ctl":
-			return nil
 		case "mtab":
 			return s.readMtab()
 		case "ready":
@@ -428,8 +426,6 @@ func (s *Server) readFile(path string) []byte {
 	}
 	if len(parts) == 2 {
 		switch parts[1] {
-		case "ctl":
-			return nil
 		case "cwd":
 			return []byte(m.cwd + "\n")
 		case "list":
@@ -678,7 +674,6 @@ func (s *Server) readDir(path string, offset uint64, count uint32) []byte {
 		return plan9.Dir{Qid: q, Mode: mode, Name: name, Uid: "beads", Gid: "beads", Muid: "beads"}
 	}
 	if path == "/" {
-		dirs = append(dirs, mk("ctl", "/ctl", false, 0222))
 		dirs = append(dirs, mk("mount", "/mount", false, 0222))
 		dirs = append(dirs, mk("umount", "/umount", false, 0222))
 		dirs = append(dirs, mk("mtab", "/mtab", false, 0444))
@@ -699,7 +694,6 @@ func (s *Server) readDir(path string, offset uint64, count uint32) []byte {
 		s.mu.RUnlock()
 		if ok && len(parts) == 1 {
 			// Mount root directory
-			dirs = append(dirs, mk("ctl", path+"/ctl", false, 0222))
 			dirs = append(dirs, mk("cwd", path+"/cwd", false, 0444))
 			dirs = append(dirs, mk("list", path+"/list", false, 0444))
 			dirs = append(dirs, mk("ready", path+"/ready", false, 0444))
@@ -772,7 +766,7 @@ func (s *Server) makeStat(path string) plan9.Dir {
 	} else {
 		mode = 0666
 		switch base {
-		case "ctl", "mount", "umount":
+		case "mount", "umount":
 			mode = 0222
 		case "mtab", "cwd", "list", "ready", "deferred", "closed", "events":
 			mode = 0444
@@ -798,9 +792,6 @@ func (s *Server) handleWrite(path string, data []byte) error {
 	if input == "" {
 		return nil
 	}
-	if path == "/ctl" {
-		return s.handleRootCtl(input)
-	}
 	if path == "/mount" {
 		return s.doMount(input, "")
 	}
@@ -818,9 +809,6 @@ func (s *Server) handleWrite(path string, data []byte) error {
 	if !ok {
 		return fmt.Errorf("mount not found: %s", parts[0])
 	}
-	if parts[1] == "ctl" {
-		return s.handleMountCtl(m, input)
-	}
 	if parts[1] == "new" {
 		return s.handleNewWrite(m, data)
 	}
@@ -831,36 +819,6 @@ func (s *Server) handleWrite(path string, data []byte) error {
 	}
 	return s.handleBeadWrite(m, parts[1], data)
 }
-
-func (s *Server) handleRootCtl(input string) error {
-	args, err := ParseArgs(input)
-	if err != nil {
-		return fmt.Errorf("parse error: %w", err)
-	}
-	if len(args) == 0 {
-		return fmt.Errorf("empty command")
-	}
-	switch args[0] {
-	case "mount":
-		if len(args) < 2 {
-			return fmt.Errorf("mount requires <cwd>")
-		}
-		cwd := args[1]
-		name := ""
-		if len(args) >= 3 {
-			name = args[2]
-		}
-		return s.doMount(cwd, name)
-	case "umount":
-		if len(args) < 2 {
-			return fmt.Errorf("umount requires <name|cwd>")
-		}
-		return s.doUmount(args[1])
-	default:
-		return fmt.Errorf("unknown global command: %s", args[0])
-	}
-}
-
 
 func cwdToBeadsDir(beadsDir, cwd string) string {
 	mangled := strings.ReplaceAll(cwd, "/", "-")
@@ -973,61 +931,6 @@ func (s *Server) doUmount(nameOrCwd string) error {
 	return fmt.Errorf("umount: %q not found", nameOrCwd)
 }
 
-func (s *Server) handleMountCtl(m *mount, input string) error {
-	args, err := ParseArgs(input)
-	if err != nil {
-		return fmt.Errorf("parse error: %w", err)
-	}
-	if len(args) == 0 {
-		return fmt.Errorf("empty command")
-	}
-	ctx := context.Background()
-	cmd := args[0]
-	args = args[1:]
-	switch cmd {
-	case "new":
-		return s.cmdNew(ctx, m, args)
-	case "claim":
-		return s.cmdClaim(ctx, m, args)
-	case "unclaim":
-		return s.cmdUnclaim(ctx, m, args)
-	case "open":
-		return s.cmdOpen(ctx, m, args)
-	case "defer":
-		return s.cmdDefer(ctx, m, args)
-	case "reopen":
-		return s.cmdReopen(ctx, m, args)
-	case "complete":
-		return s.cmdComplete(ctx, m, args)
-	case "fail":
-		return s.cmdFail(ctx, m, args)
-	case "update":
-		return s.cmdUpdate(ctx, m, args)
-	case "delete":
-		return s.cmdDelete(ctx, m, args)
-	case "comment":
-		return s.cmdComment(ctx, m, args)
-	case "label":
-		return s.cmdLabel(ctx, m, args)
-	case "unlabel":
-		return s.cmdUnlabel(ctx, m, args)
-	case "set-capability":
-		return s.cmdSetCapability(ctx, m, args)
-	case "dep":
-		return s.cmdDep(ctx, m, args)
-	case "undep":
-		return s.cmdUndep(ctx, m, args)
-	case "relate":
-		return s.cmdRelate(ctx, m, args)
-	case "init":
-		return s.cmdInit(ctx, m, args)
-	case "batch-create":
-		return s.cmdBatchCreate(ctx, m, args)
-	default:
-		return fmt.Errorf("unknown command %q", cmd)
-	}
-}
-
 func (s *Server) generateID(ctx context.Context, m *mount, parent string) string {
 	prefix, _ := m.store.GetConfig(ctx, "issue_prefix")
 	if prefix == "" {
@@ -1066,57 +969,6 @@ func (s *Server) generateID(ctx context.Context, m *mount, parent string) string
 		id = id[len(id)-4:]
 	}
 	return prefix + "-" + id
-}
-
-func (s *Server) cmdNew(ctx context.Context, m *mount, args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("new requires title")
-	}
-	title := args[0]
-	desc := ""
-	if len(args) >= 2 {
-		desc = args[1]
-	}
-	pos, kv := ParseKV(args[2:])
-	parentID := ""
-	if len(pos) > 0 {
-		parentID = pos[0]
-	}
-	id := s.generateID(ctx, m, parentID)
-	now := time.Now()
-	issue := &beads.Issue{
-		ID: id, Title: title, Description: desc,
-		Status: beads.StatusOpen, Priority: 2, IssueType: beads.TypeTask,
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if v, ok := kv["scope"]; ok {
-		issue.SpecID = v
-	}
-	if err := m.store.CreateIssue(ctx, issue, "9beads"); err != nil {
-		return fmt.Errorf("new: %w", err)
-	}
-	if v, ok := kv["capability"]; ok {
-		m.store.AddLabel(ctx, id, "capability:"+v, "9beads")
-	}
-	if parentID != "" {
-		m.store.AddDependency(ctx, &beads.Dependency{
-			IssueID: id, DependsOnID: parentID, Type: beads.DepParentChild,
-			CreatedAt: now, CreatedBy: "9beads",
-		}, "9beads")
-	}
-	if blockerStr, ok := kv["blockers"]; ok {
-		for _, bid := range strings.Split(blockerStr, ",") {
-			bid = strings.TrimSpace(bid)
-			if bid != "" {
-				m.store.AddDependency(ctx, &beads.Dependency{
-					IssueID: id, DependsOnID: bid, Type: beads.DepBlocks,
-					CreatedAt: now, CreatedBy: "9beads",
-				}, "9beads")
-			}
-		}
-	}
-	s.events.append(map[string]string{"type": "created", "id": id, "mount": m.name})
-	return nil
 }
 
 func (s *Server) cmdClaim(ctx context.Context, m *mount, args []string) error {
@@ -1174,27 +1026,11 @@ func (s *Server) cmdFail(ctx context.Context, m *mount, args []string) error {
 	return nil
 }
 
-func (s *Server) cmdUpdate(ctx context.Context, m *mount, args []string) error {
-	if len(args) < 3 {
-		return fmt.Errorf("update requires <id> <field> <value>")
-	}
-	if args[1] == "status" || args[1] == "assignee" {
-		return fmt.Errorf("update cannot change %s (use claim/complete/defer)", args[1])
-	}
-	return m.store.UpdateIssue(ctx, args[0], map[string]interface{}{args[1]: args[2]}, "9beads")
-}
-
 func (s *Server) cmdDelete(ctx context.Context, m *mount, args []string) error {
 	if len(args) < 1 { return fmt.Errorf("delete requires <id>") }
 	if err := m.store.DeleteIssue(ctx, args[0]); err != nil { return err }
 	s.events.append(map[string]string{"type": "deleted", "id": args[0], "mount": m.name})
 	return nil
-}
-
-func (s *Server) cmdComment(ctx context.Context, m *mount, args []string) error {
-	if len(args) < 2 { return fmt.Errorf("comment requires <id> <text>") }
-	_, err := m.store.AddIssueComment(ctx, args[0], "9beads", args[1])
-	return err
 }
 
 func (s *Server) cmdLabel(ctx context.Context, m *mount, args []string) error {
@@ -1205,17 +1041,6 @@ func (s *Server) cmdLabel(ctx context.Context, m *mount, args []string) error {
 func (s *Server) cmdUnlabel(ctx context.Context, m *mount, args []string) error {
 	if len(args) < 2 { return fmt.Errorf("unlabel requires <id> <label>") }
 	return m.store.RemoveLabel(ctx, args[0], args[1], "9beads")
-}
-
-func (s *Server) cmdSetCapability(ctx context.Context, m *mount, args []string) error {
-	if len(args) < 2 { return fmt.Errorf("set-capability requires <id> <level>") }
-	labels, _ := m.store.GetLabels(ctx, args[0])
-	for _, l := range labels {
-		if strings.HasPrefix(l, "capability:") {
-			m.store.RemoveLabel(ctx, args[0], l, "9beads")
-		}
-	}
-	return m.store.AddLabel(ctx, args[0], "capability:"+args[1], "9beads")
 }
 
 func (s *Server) cmdDep(ctx context.Context, m *mount, args []string) error {
@@ -1243,23 +1068,6 @@ func (s *Server) cmdInit(ctx context.Context, m *mount, args []string) error {
 	prefix := "bd"
 	if len(args) >= 1 { prefix = args[0] }
 	return m.store.SetConfig(ctx, "issue_prefix", prefix)
-}
-
-func (s *Server) cmdBatchCreate(ctx context.Context, m *mount, args []string) error {
-	if len(args) < 1 { return fmt.Errorf("batch-create requires <json-array>") }
-	batch, err := ParseBatchCreate(strings.Join(args, " "))
-	if err != nil {
-		return fmt.Errorf("batch-create: %w", err)
-	}
-	for _, item := range batch {
-		title, _ := item["title"].(string)
-		if title == "" { continue }
-		desc, _ := item["description"].(string)
-		newArgs := []string{title}
-		if desc != "" { newArgs = append(newArgs, desc) }
-		if err := s.cmdNew(ctx, m, newArgs); err != nil { return err }
-	}
-	return nil
 }
 
 func (s *Server) handleMountEndpointWrite(m *mount, endpoint, input string) error {
@@ -1298,6 +1106,8 @@ func (s *Server) handleMountEndpointWrite(m *mount, endpoint, input string) erro
 			cmdArgs = append(cmdArgs, "until", v)
 		}
 		return s.cmdDefer(ctx, m, cmdArgs)
+	case "reopen":
+		return s.cmdReopen(ctx, m, []string{id})
 	case "complete":
 		return s.cmdComplete(ctx, m, []string{id})
 	case "fail":
