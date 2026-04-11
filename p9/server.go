@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -16,7 +17,10 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+
+	_ "github.com/go-sql-driver/mysql"
 
 	"9beads/config"
 	"9fans.net/go/plan9"
@@ -37,9 +41,10 @@ var mountWriteEndpoints = []string{
 }
 
 type mount struct {
-	name  string
-	cwd   string
-	store beads.Storage
+	name      string
+	cwd       string
+	store     beads.Storage
+	beadsPath string
 }
 
 type Server struct {
@@ -389,6 +394,7 @@ func (s *Server) Close() {
 	defer s.mu.Unlock()
 	for _, m := range s.mounts {
 		m.store.Close()
+		stopDoltServer(m.beadsPath)
 	}
 }
 
@@ -902,7 +908,7 @@ func (s *Server) doMount(cwd, name string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open store for %s: %v", cwd, err)
 	}
-	m := &mount{name: name, cwd: cwd, store: store}
+	m := &mount{name: name, cwd: cwd, store: store, beadsPath: beadsPath}
 	s.mu.Lock()
 	s.mounts[name] = m
 	s.mu.Unlock()
@@ -916,6 +922,7 @@ func (s *Server) doUmount(nameOrCwd string) error {
 	defer s.mu.Unlock()
 	if m, ok := s.mounts[nameOrCwd]; ok {
 		m.store.Close()
+		go stopDoltServer(m.beadsPath)
 		delete(s.mounts, nameOrCwd)
 		s.events.append(map[string]string{"type": "umount", "name": nameOrCwd})
 		return nil
@@ -923,6 +930,7 @@ func (s *Server) doUmount(nameOrCwd string) error {
 	for name, m := range s.mounts {
 		if m.cwd == nameOrCwd {
 			m.store.Close()
+			go stopDoltServer(m.beadsPath)
 			delete(s.mounts, name)
 			s.events.append(map[string]string{"type": "umount", "name": name})
 			return nil
@@ -1221,4 +1229,105 @@ func (s *Server) handleBeadWrite(m *mount, id string, data []byte) error {
 	}
 	s.events.append(map[string]string{"type": "updated", "id": id, "mount": m.name})
 	return nil
+}
+
+// stopDoltServer flushes the dolt working set and stops the dolt sql-server
+// for the given beadsPath. Mirrors doltserver.StopWithForce without importing
+// the internal package.
+//
+// 9beads uses a central ~/.beads/ directory (one beadsPath per mounted project)
+// rather than per-project .beads/ directories. This means bd is never invoked,
+// so the dolt sql-server started by beads.OpenFromConfig has no natural owner
+// to shut it down. Without this, dolt processes accumulate — one per mount,
+// surviving across 9beads restarts — and continuously write stats to disk.
+func stopDoltServer(beadsPath string) {
+	if beadsPath == "" {
+		return
+	}
+
+	// Read port for flush
+	portData, err := os.ReadFile(filepath.Join(beadsPath, "dolt-server.port"))
+	if err == nil {
+		var port int
+		if _, err := fmt.Sscanf(strings.TrimSpace(string(portData)), "%d", &port); err == nil && port > 0 {
+			flushDoltWorkingSet("127.0.0.1", port)
+		}
+	}
+
+	// Read pid and stop
+	pidData, err := os.ReadFile(filepath.Join(beadsPath, "dolt-server.pid"))
+	if err != nil {
+		return
+	}
+	var pid int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(pidData)), "%d", &pid); err != nil || pid <= 0 {
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		return
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		if proc.Signal(syscall.Signal(0)) != nil {
+			break
+		}
+	}
+	_ = proc.Signal(syscall.SIGKILL)
+	_, _ = proc.Wait() // reap the process, preventing a zombie
+
+	_ = os.Remove(filepath.Join(beadsPath, "dolt-server.pid"))
+	_ = os.Remove(filepath.Join(beadsPath, "dolt-server.port"))
+}
+
+// flushDoltWorkingSet commits any uncommitted dolt changes before server stop.
+func flushDoltWorkingSet(host string, port int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dsn := fmt.Sprintf("root@tcp(%s:%d)/?parseTime=true", host, port)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetConnMaxLifetime(10 * time.Second)
+
+	if err := db.PingContext(ctx); err != nil {
+		return
+	}
+
+	rows, err := db.QueryContext(ctx, "SHOW DATABASES")
+	if err != nil {
+		return
+	}
+	var databases []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+		if name == "information_schema" || name == "mysql" || name == "performance_schema" {
+			continue
+		}
+		databases = append(databases, name)
+	}
+	_ = rows.Close()
+
+	for _, dbName := range databases {
+		var hasChanges bool
+		row := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) > 0 FROM `%s`.dolt_status", dbName))
+		if err := row.Scan(&hasChanges); err != nil || !hasChanges {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("USE `%s`", dbName)); err != nil {
+			continue
+		}
+		_, _ = db.ExecContext(ctx, "CALL DOLT_COMMIT('-Am', 'auto-flush: commit working set before server stop')")
+	}
 }
