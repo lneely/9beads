@@ -29,6 +29,13 @@ const (
 	qtFile = plan9.QTFILE
 )
 
+// mountWriteEndpoints are write-only files that appear in each mount directory.
+// Each accepts a bead ID as its first argument (except "init").
+var mountWriteEndpoints = []string{
+	"claim", "unclaim", "open", "defer", "complete", "fail",
+	"label", "unlabel", "dep", "undep", "relate", "init", "delete",
+}
+
 type mount struct {
 	name  string
 	cwd   string
@@ -178,6 +185,11 @@ func (s *Server) pathType(path string) string {
 		case "comments":
 			return "dir"
 		default:
+			for _, ep := range mountWriteEndpoints {
+				if parts[1] == ep {
+					return "file"
+				}
+			}
 			ctx := context.Background()
 			issue, err := m.store.GetIssue(ctx, parts[1])
 			if err == nil && issue != nil {
@@ -694,6 +706,9 @@ func (s *Server) readDir(path string, offset uint64, count uint32) []byte {
 			dirs = append(dirs, mk("deferred", path+"/deferred", false, 0444))
 			dirs = append(dirs, mk("closed", path+"/closed", false, 0444))
 			dirs = append(dirs, mk("new", path+"/new", false, 0666))
+			for _, ep := range mountWriteEndpoints {
+				dirs = append(dirs, mk(ep, path+"/"+ep, false, 0222))
+			}
 			dirs = append(dirs, mk("comments", path+"/comments", true, plan9.DMDIR|0555))
 			ctx := context.Background()
 			issues, _ := m.store.SearchIssues(ctx, "", beads.IssueFilter{
@@ -755,13 +770,19 @@ func (s *Server) makeStat(path string) plan9.Dir {
 		qid.Type = qtDir
 		mode = plan9.DMDIR | 0555
 	} else {
+		mode = 0666
 		switch base {
 		case "ctl", "mount", "umount":
 			mode = 0222
 		case "mtab", "cwd", "list", "ready", "deferred", "closed", "events":
 			mode = 0444
 		default:
-			mode = 0666
+			for _, ep := range mountWriteEndpoints {
+				if base == ep {
+					mode = 0222
+					break
+				}
+			}
 		}
 	}
 	dir := plan9.Dir{Qid: qid, Mode: mode, Name: base, Uid: "beads", Gid: "beads", Muid: "beads"}
@@ -802,6 +823,11 @@ func (s *Server) handleWrite(path string, data []byte) error {
 	}
 	if parts[1] == "new" {
 		return s.handleNewWrite(m, data)
+	}
+	for _, ep := range mountWriteEndpoints {
+		if parts[1] == ep {
+			return s.handleMountEndpointWrite(m, ep, input)
+		}
 	}
 	return s.handleBeadWrite(m, parts[1], data)
 }
@@ -1234,6 +1260,83 @@ func (s *Server) cmdBatchCreate(ctx context.Context, m *mount, args []string) er
 		if err := s.cmdNew(ctx, m, newArgs); err != nil { return err }
 	}
 	return nil
+}
+
+func (s *Server) handleMountEndpointWrite(m *mount, endpoint, input string) error {
+	args, err := ParseArgs(input)
+	if err != nil {
+		return fmt.Errorf("%s: %w", endpoint, err)
+	}
+	ctx := context.Background()
+
+	// init takes a prefix, not a bead ID
+	if endpoint == "init" {
+		return s.cmdInit(ctx, m, args)
+	}
+
+	if len(args) == 0 {
+		return fmt.Errorf("%s: bead ID required", endpoint)
+	}
+	id := args[0]
+	rest := args[1:]
+	_, kv := ParseKV(rest)
+
+	switch endpoint {
+	case "claim":
+		cmdArgs := []string{id}
+		if v, ok := kv["assignee"]; ok {
+			cmdArgs = append(cmdArgs, v)
+		}
+		return s.cmdClaim(ctx, m, cmdArgs)
+	case "unclaim":
+		return s.cmdUnclaim(ctx, m, []string{id})
+	case "open":
+		return s.cmdOpen(ctx, m, []string{id})
+	case "defer":
+		cmdArgs := []string{id}
+		if v, ok := kv["until"]; ok {
+			cmdArgs = append(cmdArgs, "until", v)
+		}
+		return s.cmdDefer(ctx, m, cmdArgs)
+	case "complete":
+		return s.cmdComplete(ctx, m, []string{id})
+	case "fail":
+		cmdArgs := []string{id}
+		if v, ok := kv["reason"]; ok {
+			cmdArgs = append(cmdArgs, v)
+		} else if len(rest) > 0 {
+			cmdArgs = append(cmdArgs, rest[0])
+		}
+		return s.cmdFail(ctx, m, cmdArgs)
+	case "label":
+		if len(rest) < 1 {
+			return fmt.Errorf("label: key:value required")
+		}
+		return s.cmdLabel(ctx, m, []string{id, rest[0]})
+	case "unlabel":
+		if len(rest) < 1 {
+			return fmt.Errorf("unlabel: key:value required")
+		}
+		return s.cmdUnlabel(ctx, m, []string{id, rest[0]})
+	case "dep":
+		if len(rest) < 1 {
+			return fmt.Errorf("dep: parent ID required")
+		}
+		return s.cmdDep(ctx, m, []string{id, rest[0]})
+	case "undep":
+		if len(rest) < 1 {
+			return fmt.Errorf("undep: parent ID required")
+		}
+		return s.cmdUndep(ctx, m, []string{id, rest[0]})
+	case "relate":
+		if len(rest) < 1 {
+			return fmt.Errorf("relate: second ID required")
+		}
+		return s.cmdRelate(ctx, m, []string{id, rest[0]})
+	case "delete":
+		return s.cmdDelete(ctx, m, []string{id})
+	}
+	return fmt.Errorf("unknown endpoint: %s", endpoint)
 }
 
 func (s *Server) handleBeadWrite(m *mount, id string, data []byte) error {
