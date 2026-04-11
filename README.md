@@ -47,6 +47,8 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
 ```
 ~/mnt/beads/
 ├── ctl              # global control (mount, umount)
+├── mount            # write-only: echo /path/to/project > mount
+├── umount           # write-only: echo <name|path> > umount
 ├── mtab             # mount table: <name>\t<cwd>
 ├── ready            # ready beads across all mounts
 ├── deferred         # deferred beads across all mounts
@@ -59,6 +61,7 @@ On startup, the server mounts at `$BEADS_9MOUNT` (default: `~/mnt/beads`) via 9p
     ├── ready        # ready beads (open, unblocked)
     ├── deferred     # deferred beads
     ├── closed       # closed beads
+    ├── new          # read: empty bead template; write: create new bead
     ├── comments/    # per-bead comments
     │   └── <bead-id>    # all comments (separated by ---)
     └── <bead-id>    # bead file (markdown + YAML frontmatter)
@@ -89,6 +92,16 @@ Add OAuth token refresh logic in auth/token.go.
 ```
 
 Read and write it like any file. On write, the frontmatter is parsed and the store is updated.
+
+To create a new bead, read `<mount>/new` for a blank template, fill it in, and write it back:
+
+```sh
+cat $bdir/new > /tmp/bead.md
+# edit /tmp/bead.md
+cat /tmp/bead.md > $bdir/new
+```
+
+The ID is auto-generated. If `parent:` is set, the parent-child relationship is established automatically. `labels` and `blockers` are also wired up on creation.
 
 > Note: `sed -i` is not supported on 9P filesystems. Pipe through sed instead:
 > `sed "s/^title: .*/title: New title/" $bdir/bd-a1b2 > $bdir/bd-a1b2`
@@ -153,7 +166,11 @@ mount=$(awk '$2=="/home/user/myproject"{print $1}' $mnt/mtab)
 bdir=$mnt/$mount
 
 # mount a project
-echo "mount /home/user/myproject" > $mnt/ctl
+echo /home/user/myproject > $mnt/mount
+
+# unmount by name or path
+echo myproject > $mnt/umount
+echo /home/user/myproject > $mnt/umount
 
 # list open beads
 cat $bdir/list
@@ -164,7 +181,12 @@ cat $bdir/bd-a1b2
 # edit a bead (title, status, blockers, description)
 $EDITOR $bdir/bd-a1b2
 
-# create a bead
+# create a bead via the new endpoint
+cat $bdir/new > /tmp/bead.md
+# edit /tmp/bead.md, then:
+cat /tmp/bead.md > $bdir/new
+
+# create a bead via ctl (legacy)
 echo "new 'Fix login bug' 'OAuth token not refreshed'" > $bdir/ctl
 
 # claim / complete
@@ -208,6 +230,14 @@ Written to global `ctl`:
 |---------|--------|-------------|
 | `mount` | `mount <cwd> [name]` | Mount a project |
 | `umount` | `umount <name\|cwd>` | Unmount a project |
+
+These can also be written directly to the `mount` and `umount` files without a command prefix:
+
+```sh
+echo /path/to/project > $mnt/mount
+echo myproject > $mnt/umount
+echo /path/to/project > $mnt/umount
+```
 
 ## See Also
 

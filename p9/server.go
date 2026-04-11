@@ -155,7 +155,7 @@ func (s *Server) pathType(path string) string {
 	switch {
 	case len(parts) == 1:
 		switch parts[0] {
-		case "ctl", "mtab", "ready", "deferred", "closed", "events":
+		case "ctl", "mount", "umount", "mtab", "ready", "deferred", "closed", "events":
 			return "file"
 		default:
 			s.mu.RLock()
@@ -173,7 +173,7 @@ func (s *Server) pathType(path string) string {
 			return ""
 		}
 		switch parts[1] {
-		case "ctl", "cwd", "list", "ready", "deferred", "closed":
+		case "ctl", "cwd", "list", "ready", "deferred", "closed", "new":
 			return "file"
 		case "comments":
 			return "dir"
@@ -428,6 +428,8 @@ func (s *Server) readFile(path string) []byte {
 			return s.readMountList(ctx, m, "deferred")
 		case "closed":
 			return s.readMountList(ctx, m, "closed")
+		case "new":
+			return s.readNewTemplate()
 		default:
 			return s.readBead(ctx, m, parts[1])
 		}
@@ -544,6 +546,91 @@ func (s *Server) readBead(ctx context.Context, m *mount, id string) []byte {
 	return []byte(b.String())
 }
 
+func (s *Server) readNewTemplate() []byte {
+	fm := struct {
+		Title    string   `yaml:"title"`
+		Status   string   `yaml:"status"`
+		Parent   string   `yaml:"parent"`
+		Labels   []string `yaml:"labels,flow"`
+		Blockers []string `yaml:"blockers,flow"`
+	}{
+		Status:   string(beads.StatusOpen),
+		Labels:   []string{},
+		Blockers: []string{},
+	}
+	fmBytes, _ := yaml.Marshal(fm)
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.Write(fmBytes)
+	b.WriteString("---\n")
+	return []byte(b.String())
+}
+
+func (s *Server) handleNewWrite(m *mount, data []byte) error {
+	content := string(data)
+	if !strings.HasPrefix(content, "---\n") {
+		return fmt.Errorf("new: content must begin with frontmatter (---)")
+	}
+	rest := content[4:]
+	endIdx := strings.Index(rest, "\n---\n")
+	if endIdx < 0 {
+		if strings.HasSuffix(strings.TrimRight(rest, "\n"), "---") {
+			endIdx = strings.LastIndex(rest, "---")
+		}
+		if endIdx < 0 {
+			return fmt.Errorf("new: invalid frontmatter: missing closing ---")
+		}
+	}
+	fmStr := rest[:endIdx]
+	body := ""
+	if endIdx+5 <= len(rest) {
+		body = rest[endIdx+5:]
+	}
+	var fm beadFrontmatter
+	if err := yaml.Unmarshal([]byte(fmStr), &fm); err != nil {
+		return fmt.Errorf("new: parse frontmatter: %w", err)
+	}
+	if fm.Title == "" {
+		return fmt.Errorf("new: title is required")
+	}
+	ctx := context.Background()
+	id := s.generateID(ctx, m, fm.Parent)
+	now := time.Now()
+	issue := &beads.Issue{
+		ID:          id,
+		Title:       fm.Title,
+		Description: strings.TrimRight(body, "\n"),
+		Status:      beads.StatusOpen,
+		Priority:    2,
+		IssueType:   beads.TypeTask,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if fm.Status != "" {
+		issue.Status = beads.Status(fm.Status)
+	}
+	if err := m.store.CreateIssue(ctx, issue, "9beads"); err != nil {
+		return fmt.Errorf("new: %w", err)
+	}
+	if fm.Parent != "" {
+		m.store.AddDependency(ctx, &beads.Dependency{
+			IssueID: id, DependsOnID: fm.Parent, Type: beads.DepParentChild,
+			CreatedAt: now, CreatedBy: "9beads",
+		}, "9beads")
+	}
+	for _, l := range fm.Labels {
+		m.store.AddLabel(ctx, id, l, "9beads")
+	}
+	for _, bid := range fm.Blockers {
+		m.store.AddDependency(ctx, &beads.Dependency{
+			IssueID: id, DependsOnID: bid, Type: beads.DepBlocks,
+			CreatedAt: now, CreatedBy: "9beads",
+		}, "9beads")
+	}
+	s.events.append(map[string]string{"type": "created", "id": id, "mount": m.name})
+	return nil
+}
+
 func (s *Server) readCommentList(ctx context.Context, m *mount, beadID string) []byte {
 	comments, err := m.store.GetIssueComments(ctx, beadID)
 	if err != nil || len(comments) == 0 {
@@ -580,6 +667,8 @@ func (s *Server) readDir(path string, offset uint64, count uint32) []byte {
 	}
 	if path == "/" {
 		dirs = append(dirs, mk("ctl", "/ctl", false, 0222))
+		dirs = append(dirs, mk("mount", "/mount", false, 0222))
+		dirs = append(dirs, mk("umount", "/umount", false, 0222))
 		dirs = append(dirs, mk("mtab", "/mtab", false, 0444))
 		dirs = append(dirs, mk("ready", "/ready", false, 0444))
 		dirs = append(dirs, mk("deferred", "/deferred", false, 0444))
@@ -604,6 +693,7 @@ func (s *Server) readDir(path string, offset uint64, count uint32) []byte {
 			dirs = append(dirs, mk("ready", path+"/ready", false, 0444))
 			dirs = append(dirs, mk("deferred", path+"/deferred", false, 0444))
 			dirs = append(dirs, mk("closed", path+"/closed", false, 0444))
+			dirs = append(dirs, mk("new", path+"/new", false, 0666))
 			dirs = append(dirs, mk("comments", path+"/comments", true, plan9.DMDIR|0555))
 			ctx := context.Background()
 			issues, _ := m.store.SearchIssues(ctx, "", beads.IssueFilter{
@@ -666,7 +756,7 @@ func (s *Server) makeStat(path string) plan9.Dir {
 		mode = plan9.DMDIR | 0555
 	} else {
 		switch base {
-		case "ctl":
+		case "ctl", "mount", "umount":
 			mode = 0222
 		case "mtab", "cwd", "list", "ready", "deferred", "closed", "events":
 			mode = 0444
@@ -690,6 +780,12 @@ func (s *Server) handleWrite(path string, data []byte) error {
 	if path == "/ctl" {
 		return s.handleRootCtl(input)
 	}
+	if path == "/mount" {
+		return s.doMount(input, "")
+	}
+	if path == "/umount" {
+		return s.doUmount(input)
+	}
 	trimmed := strings.TrimPrefix(path, "/")
 	parts := strings.SplitN(trimmed, "/", 3)
 	if len(parts) < 2 {
@@ -703,6 +799,9 @@ func (s *Server) handleWrite(path string, data []byte) error {
 	}
 	if parts[1] == "ctl" {
 		return s.handleMountCtl(m, input)
+	}
+	if parts[1] == "new" {
+		return s.handleNewWrite(m, data)
 	}
 	return s.handleBeadWrite(m, parts[1], data)
 }
